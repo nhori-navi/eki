@@ -13,25 +13,46 @@
 :root{--ink:#2b2118;--sub:#6b5a44;--paper:#fbf6ea;--edge:#d8ccb0;--red:#c62828}
 html,body{margin:0;height:100%;font-family:"Yu Gothic UI",Meiryo,"Hiragino Sans",sans-serif;background:#e8e2d2;color:var(--ink);overflow:hidden}
 #map{position:absolute;inset:0}
-.card{position:absolute;z-index:1001;left:12px;right:12px;bottom:16px;max-width:640px;margin:auto;background:var(--paper);border:1px solid var(--edge);border-radius:12px;box-shadow:0 3px 14px rgba(0,0,0,.25);padding:10px 14px;max-height:62vh;overflow:auto;box-sizing:border-box}
+.card{position:absolute;z-index:1001;left:12px;right:12px;bottom:26px;max-width:640px;margin:auto;background:var(--paper);border:1px solid var(--edge);border-radius:12px;box-shadow:0 3px 14px rgba(0,0,0,.25);padding:10px 14px;max-height:62vh;overflow:auto;box-sizing:border-box}
 .head{display:flex;align-items:flex-end;gap:10px}
-#year{font-size:34px;font-weight:700;line-height:1}
-#era{font-size:15px;color:var(--sub)}
-#count{margin-left:auto;font-size:12px;text-align:right}
-#spark{width:130px;height:32px;display:block}
+.bar{display:flex;align-items:center;gap:10px}
+.yr{flex:1;min-width:0;display:flex;align-items:baseline;gap:4px 8px;flex-wrap:wrap}
+#year{font-size:32px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+#era{font-size:14px;color:var(--sub)}
+#cnt{font-size:12px;color:var(--sub)}
+#spark{width:110px;height:32px;display:block;flex:none}
+@media (max-width:440px){#spark{display:none}}
 .row{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin-top:8px}
-input[type=range]{flex:1;min-width:140px;accent-color:var(--red)}
-button,select,input[type=text]{font:inherit;font-size:14px;padding:4px 9px;border:1px solid #bfae8a;border-radius:6px;background:#fff;color:var(--ink)}
+input[type=range]{flex:1;min-width:120px;-webkit-appearance:none;appearance:none;height:32px;background:transparent;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:8px;border-radius:4px;background:#d9cfb8}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:28px;height:28px;border-radius:50%;background:var(--red);border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);margin-top:-10px}
+input[type=range]::-moz-range-track{height:8px;border-radius:4px;background:#d9cfb8}
+input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--red);border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
+button,select,input[type=text],input[type=number]{font:inherit;font-size:14px;padding:4px 10px;border:1px solid #bfae8a;border-radius:8px;background:#fff;color:var(--ink);min-height:38px;box-sizing:border-box}
+@media (pointer:coarse){button,select,input[type=text],input[type=number]{min-height:44px}}
+.big{min-width:50px;min-height:50px!important;font-size:22px;padding:0 10px}
 button{cursor:pointer}
 button.on{background:#1f4e79;color:#fff;border-color:#1f4e79}
-#play{font-size:16px;width:44px}
-label{font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:3px}
+
+label{font-size:13px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;min-height:32px}
+input[type=checkbox]{width:18px;height:18px}
 input[type=text]{width:8.5em}
-#news{font-size:12px;color:var(--red);margin-top:6px;max-height:3.6em;overflow:auto}
-#drawer{display:none;border-top:1px dashed var(--edge);margin-top:8px}
+#news{font-size:12px;color:var(--red);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sl{flex-wrap:nowrap}
+.sec{font-size:12px;font-weight:700;color:var(--sub);margin-top:14px;padding-bottom:2px;border-bottom:1px solid var(--edge)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px;margin-top:8px}
+.tiles button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 4px;min-height:68px;font-size:24px;line-height:1}
+.tiles button span{font-size:12px}
 .sw{display:inline-block;width:14px;height:4px;border-radius:2px}
 #msg{position:absolute;z-index:1003;top:12px;left:50%;transform:translateX(-50%);background:#fff;padding:8px 14px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.2);font-size:14px;max-width:90%}
-#bgNote{position:absolute;z-index:999;left:10px;top:10px;background:rgba(251,246,234,.92);border:1px solid var(--edge);border-radius:6px;padding:3px 8px;font-size:12px;display:none}
+#tl{position:absolute;z-index:999;left:10px;top:10px;display:flex;flex-direction:column;gap:6px;align-items:flex-start;max-width:46vw}
+#bgNote{background:rgba(251,246,234,.92);border:1px solid var(--edge);border-radius:6px;padding:3px 8px;font-size:12px;display:none}
+#legend{background:rgba(251,246,234,.92);border:1px solid var(--edge);border-radius:6px;padding:3px 8px;font-size:11px;line-height:1.7;cursor:pointer;user-select:none}
+#legend .lg{display:flex;align-items:center;gap:6px;white-space:nowrap}
+#legend .lg.off{opacity:.35}
+#legend .sw{width:18px;height:4px}
+#legend.min .lg{display:none}
+#legend.min::after{content:"凡例 ▸"}
 #gogai{position:absolute;z-index:1001;top:12px;left:50%;transform:translate(-50%,-170%);transition:transform .45s;background:var(--paper);border:3px double var(--ink);padding:5px 12px 5px 46px;max-width:min(420px,80vw);font-size:13px;box-shadow:0 3px 10px rgba(0,0,0,.25);font-family:"Yu Mincho","Hiragino Mincho ProN",serif}
 #gogai.show{transform:translate(-50%,0)}
 #gogai .stamp{position:absolute;left:8px;top:50%;transform:translateY(-50%) rotate(-8deg);background:var(--red);color:#fff;font-weight:700;padding:4px 4px;font-size:13px;writing-mode:vertical-rl;letter-spacing:2px;white-space:nowrap}
@@ -44,7 +65,7 @@ input[type=text]{width:8.5em}
 .cardS .cn{font-size:17px;font-weight:700}
 .cardS .cl{font-size:11px;color:var(--sub);margin-bottom:4px}
 .cardS button{font-size:12px;padding:3px 7px}
-#quiz,#story,#cmp,#ride,#me{display:none}
+#quiz,#story,#cmp,#ride,#me,#menu{display:none}
 #qName{font-size:24px;font-weight:700;margin-top:4px}
 #qLine{font-size:12px;color:var(--sub)}
 #qYear{font-size:30px;font-weight:700}
@@ -56,11 +77,11 @@ input[type=text]{width:8.5em}
 .grip{display:flex;align-items:center;gap:6px;margin:-6px -8px 6px;padding:2px 4px 4px 8px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;font-size:11px;color:var(--sub);border-bottom:1px dashed var(--edge)}
 .grip:active{cursor:grabbing}
 .grip .gl{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.grip .fold{font-size:13px;padding:0 10px;line-height:22px}
+.grip .fold{font-size:14px;padding:0 12px;min-height:34px!important;min-width:48px}
 .card.folded .more{display:none}
 .card.moved{bottom:auto;right:auto;margin:0;width:min(640px,calc(100vw - 24px))}
 .verTag{font-weight:700;color:#1f4e79}
-#toast{position:absolute;z-index:1004;top:58px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid var(--edge);border-left:5px solid #1f4e79;border-radius:8px;box-shadow:0 3px 12px rgba(0,0,0,.25);padding:8px 30px 8px 12px;font-size:13px;line-height:1.6;width:max-content;max-width:min(440px,86vw);max-height:50vh;overflow:auto;display:none}
+#toast{position:absolute;z-index:1004;top:86px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid var(--edge);border-left:5px solid #1f4e79;border-radius:8px;box-shadow:0 3px 12px rgba(0,0,0,.25);padding:8px 30px 8px 12px;font-size:13px;line-height:1.6;width:max-content;max-width:min(440px,86vw);max-height:50vh;overflow:auto;display:none}
 #toastX{position:absolute;right:2px;top:2px;border:none;background:none;font-size:18px;padding:0 6px}
 #toast ul{margin:4px 0 0;padding-left:1.2em}
 #qMain{display:none}
@@ -69,16 +90,35 @@ input[type=text]{width:8.5em}
 .qc.ng{background:#fde8e6;border-color:#c62828}
 .tl{display:flex;gap:6px;align-items:baseline;font-size:12px;margin-top:2px}
 .tl button{font-size:11px;padding:1px 5px;min-width:3.6em}
-.board{display:flex;align-items:stretch;background:#fff;border:2px solid #333;border-top:8px solid #2e8b57;border-radius:6px;margin-top:6px;min-height:64px}
+.board{display:flex;align-items:stretch;background:#fff;border:2px solid #333;border-top:7px solid #2e8b57;border-radius:6px;margin-top:6px;min-height:56px}
 .board .bc{flex:1.6;text-align:center;padding:4px 2px;border-left:1px solid #ccc;border-right:1px solid #ccc}
-.board .bc b{display:block;font-size:24px;line-height:1.2;letter-spacing:2px}
+.board .bc b{display:block;font-size:22px;line-height:1.15;letter-spacing:2px}
 .board .bc small{display:block;font-size:11px;color:#555}
 .board .bl,.board .br{flex:1;display:flex;align-items:center;justify-content:center;font-size:12px;color:#333;padding:2px;text-align:center}
 .board .bl::before{content:"◀ ";color:#999}.board .br::after{content:" ▶";color:#999}
+.overlay{position:absolute;inset:0;z-index:1005;background:rgba(30,25,15,.45);display:none;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+.overlay.show{display:flex}
+.obox{background:var(--paper);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.35);padding:16px 18px;max-width:440px;width:100%;box-sizing:border-box}
+#gStep h3{margin:0 0 6px;font-size:18px}
+#gStep p{margin:4px 0;font-size:14px;line-height:1.7}
+.tk{position:relative;background:#cfe8c8;background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.18) 0 6px,transparent 6px 12px);border:1px solid #8bb07f;border-radius:4px;padding:12px 16px;font-family:"Yu Mincho","Hiragino Mincho ProN",serif;color:#1d3a16}
+.tkTop{display:flex;justify-content:space-between;font-size:13px;border-bottom:1px solid #8bb07f;padding-bottom:4px}
+.tkRoute{display:flex;align-items:center;justify-content:center;gap:12px;margin:12px 0 6px;font-size:22px}
+.tkRoute b{font-weight:700}
+.tkSmall{font-size:12px;text-align:center}
+.punch{position:absolute;right:14px;top:44px;width:16px;height:16px;border-radius:3px;background:var(--paper);box-shadow:inset 0 1px 2px rgba(0,0,0,.4);transform:scale(0);transition:transform .15s}
+.punch.done{transform:scale(1)}
+.led{background:#151515;color:#ffb74d;border-radius:4px;padding:5px 0;overflow:hidden;white-space:nowrap;margin-top:6px;font-size:15px;letter-spacing:1px;text-shadow:0 0 5px #ff9800}
+.led span{display:inline-block;padding-left:100%;animation:led 10s linear infinite}
+@keyframes led{to{transform:translateX(-100%)}}
+.rideInfo{display:flex;align-items:center;gap:10px;margin-top:4px}
+#rSpd{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+#rClock{font-size:12px;color:var(--sub)}
+@media (prefers-reduced-motion:reduce){.led span{animation:none;padding-left:0}}
 </style></head><body>
 <div id="map"></div>
 <div id="msg">線路データを読み込み中…</div>
-<div id="bgNote"></div>
+<div id="tl"><div id="legend" title="タップで小さく／大きく"></div><div id="bgNote"></div></div>
 <div id="gogai"><span class="stamp">号外</span><b id="gEra"></b><span id="gText"></span></div>
 <div id="divider"><div class="knob">⇔</div></div>
 <div id="tagA" class="cmpTag"></div><div id="tagB" class="cmpTag"></div>
@@ -87,53 +127,58 @@ input[type=text]{width:8.5em}
 
 <div id="panel" class="card">
   <div class="grip" data-card="panel"><span class="gl">⠿ 鉄道のひろがり <span class="verTag"></span></span><button class="fold" title="たたむ／ひろげる">▾</button></div>
-  <div class="head">
-    <div><span id="year">1872</span> <span id="era"></span></div>
-    <div id="count"><canvas id="spark"></canvas><span id="cnt"></span></div>
-  </div>
-  <div class="row">
-    <button id="play" title="再生">▶</button>
-    <button id="back10" title="10年もどる">−10</button>
-    <input type="range" id="slider" min="1872" value="1872">
-    <button id="fwd10" title="10年すすむ">+10</button>
-    <select id="speed"><option value="900">ゆっくり</option><option value="450" selected>ふつう</option><option value="180">はやい</option></select>
+  <div class="bar">
+    <button id="play" class="big" title="再生（スペースキー）">▶</button>
+    <div class="yr"><span id="year">1872</span><span id="era"></span><span id="cnt"></span></div>
+    <canvas id="spark"></canvas>
+    <button id="menuBtn" class="big" title="メニュー（Mキー）">≡</button>
   </div>
   <div class="more">
-    <div class="row">
-      <input type="text" id="q" list="names" placeholder="駅名で検索">
-      <button id="find">🔍</button>
-      <button id="placeBtn" title="地図の場所を選んで、その辺りの鉄道史を見る">📍 この辺り</button>
-      <button id="quizBtn">🎓 クイズ</button>
-      <button id="storyBtn">📖 ものがたり</button>
-      <button id="rideBtn">🚂 乗る</button>
-      <button id="meBtn">🎂 わたし</button>
-      <button id="cmpBtn">↔ 比べる</button>
-      <button id="optBtn">⚙ 表示</button>
-    </div>
-    <div id="drawer">
-      <div class="row" id="chips"></div>
-      <div class="row">
-        <label><input type="checkbox" id="o_emph"> 変化を強調</label>
-        <label><input type="checkbox" id="o_ghost"> 廃線の幽霊</label>
-        <label><input type="checkbox" id="o_follow"> カメラが追う</label>
-        <label><input type="checkbox" id="o_gogai"> 号外</label>
-        <label><input type="checkbox" id="o_sound"> 音</label>
-        <label><input type="checkbox" id="o_autofold"> 再生中はパネルを小さく</label>
-      </div>
-      <div class="row">
-        <label>背景 <select id="o_bg"><option value="pale">淡色地図</option><option value="photo">時代の空中写真</option></select></label>
-        <label>時代へ <select id="eraJump"></select></label>
-      </div>
-      <div class="row" style="font-size:12px">
-        <span class="verTag"></span>
-        <button id="aboutBtn" style="font-size:12px">この版について</button>
-        <button id="posReset" style="font-size:12px">パネルを元の位置へ</button>
-      </div>
-    </div>
+    <div class="row sl"><button id="back10" title="10年もどる（Shift＋←）">−10</button><input type="range" id="slider" min="1872" value="1872" aria-label="年"><button id="fwd10" title="10年すすむ（Shift＋→）">+10</button></div>
     <div id="news"></div>
   </div>
   <datalist id="names"></datalist>
   <datalist id="lineNames"></datalist>
+</div>
+
+<div id="menu" class="card">
+  <div class="grip" data-card="menu"><span class="gl">⠿ ≡ メニュー</span><button class="fold" title="たたむ／ひろげる">▾</button></div>
+  <div class="more">
+    <div class="row"><input type="text" id="q" list="names" placeholder="駅名で検索" style="flex:1;min-width:8em"><button id="find">🔍 さがす</button></div>
+    <div class="sec">遊ぶ・調べる</div>
+    <div class="tiles">
+      <button id="rideBtn">🚂<span>乗ってみる</span></button>
+      <button id="hlBtn">⭐<span>見どころ再生</span></button>
+      <button id="placeBtn">📍<span>この辺りの鉄道史</span></button>
+      <button id="quizBtn">🎓<span>クイズ</span></button>
+      <button id="storyBtn">📖<span>路線ものがたり</span></button>
+      <button id="cmpBtn">↔<span>2つの年を比べる</span></button>
+      <button id="meBtn">🎂<span>わたしの年表</span></button>
+      <button id="shareBtn">🔗<span>この画面を共有</span></button>
+    </div>
+    <div class="sec">再生</div>
+    <div class="row">
+      <label>速さ <select id="speed"><option value="900">ゆっくり</option><option value="450" selected>ふつう</option><option value="180">はやい</option></select></label>
+      <label>期間 <input type="number" id="pFrom" min="1872" style="width:5.2em"> 〜 <input type="number" id="pTo" min="1872" style="width:5.2em"></label>
+      <label>時代へ <select id="eraJump"></select></label>
+    </div>
+    <div class="sec">表示</div>
+    <div class="row" id="chips"></div>
+    <div class="row">
+      <label><input type="checkbox" id="o_emph"> 変化を強調</label>
+      <label><input type="checkbox" id="o_ghost"> 廃線の幽霊</label>
+      <label><input type="checkbox" id="o_follow"> カメラが追う</label>
+      <label><input type="checkbox" id="o_gogai"> 号外</label>
+      <label><input type="checkbox" id="o_legend"> 凡例</label>
+      <label><input type="checkbox" id="o_sound"> 音</label>
+      <label><input type="checkbox" id="o_shake"> 乗車中の揺れ</label>
+      <label><input type="checkbox" id="o_autofold"> 再生中はパネルを小さく</label>
+    </div>
+    <div class="row"><label>背景 <select id="o_bg"><option value="pale">淡色地図</option><option value="photo">時代の空中写真</option></select></label></div>
+    <div class="sec">このアプリ</div>
+    <div class="row"><span class="verTag"></span><button id="aboutBtn">この版について</button><button id="guideBtn">使い方</button><button id="posReset">パネルを元の位置へ</button></div>
+    <div class="row"><button id="menuClose" style="margin-left:auto;min-width:6em">閉じる</button></div>
+  </div>
 </div>
 
 <div id="quiz" class="card">
@@ -195,12 +240,16 @@ input[type=text]{width:8.5em}
         <button id="rGo">乗る</button><button id="rCancel" style="margin-left:auto">閉じる</button></div>
     </div>
     <div id="rMain" style="display:none">
-      <div class="head"><b id="rTitle" style="font-size:15px"></b></div>
+      <b id="rTitle" style="display:none"></b>
+      <div class="led"><span id="ledText"></span></div>
       <div id="rBoard" class="board"></div>
-      <div id="rInfo" style="font-size:12px;margin-top:4px"></div>
+      <div class="rideInfo">
+        <svg id="meter" viewBox="0 0 100 60" width="72" height="44" aria-hidden="true"><path d="M10 55 A40 40 0 0 1 90 55" fill="none" stroke="#d9cfb8" stroke-width="7" stroke-linecap="round"/><line id="needle" x1="50" y1="55" x2="50" y2="20" stroke="#c62828" stroke-width="3" stroke-linecap="round"/><circle cx="50" cy="55" r="4" fill="#333"/></svg>
+        <div style="min-width:0"><div id="rSpd">0 km/h</div><div id="rClock"></div><div id="rInfo" style="font-size:12px"></div></div>
+      </div>
       <div class="row"><button id="rPause">❚❚</button>
         <select id="rSpeed"><option value="0.5">×0.5</option><option value="1" selected>×1</option><option value="2">×2</option><option value="4">×4</option></select>
-        <button id="rRev">⇄ 逆向き</button><button id="rQuit" style="margin-left:auto">降りる</button></div>
+        <button id="rRev">⇄ 逆向き</button><label><input type="checkbox" id="rSound" checked> 音</label><button id="rQuit" style="margin-left:auto">降りる</button></div>
     </div>
   </div>
 </div>
@@ -215,9 +264,23 @@ input[type=text]{width:8.5em}
   </div>
 </div>
 
+<div id="guide" class="overlay"><div class="obox"><div id="gStep"></div><div class="row"><span id="gDots" style="font-size:12px;color:var(--sub)"></span><button id="gSkip" style="margin-left:auto">とばす</button><button id="gNext">次へ</button></div></div></div>
+
+<div id="ticket" class="overlay"><div class="obox" style="max-width:360px">
+  <div class="tk">
+    <div class="tkTop"><span>乗車券</span><span id="tkNo"></span></div>
+    <div class="tkRoute"><b id="tkFrom"></b><span>→</span><b id="tkTo"></b></div>
+    <div id="tkLine" class="tkSmall"></div>
+    <div id="tkDate" class="tkSmall"></div>
+    <div id="tkFare" class="tkSmall"></div>
+    <div id="tkPunch" class="punch"></div>
+  </div>
+  <div class="row"><button id="tkCancel">やめる</button><button id="tkGo" style="margin-left:auto">✂ 改札を通って乗る</button></div>
+</div></div>
+
 <script>
 // 読み込み中に問題が起きたら、止まったままにせず画面に出す
 window.addEventListener('error', e => { const m = document.getElementById('msg'); if (m && m.style.display !== 'none') m.textContent = '問題が起きました：' + (e.message || '') + '（ページを再読み込みしてください）'; });
 </script>
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body></html>
