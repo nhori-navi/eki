@@ -68,7 +68,7 @@ try { Object.assign(opt, JSON.parse(localStorage.getItem(PREF) || '{}'), {sound:
 const savePref = () => { try { localStorage.setItem(PREF, JSON.stringify(opt)); } catch (e) {} };
 
 // ---------- 地図 ----------
-const map = L.map('map', {preferCanvas: true, zoomControl: false}).setView([35.52, 139.66], 10);
+const map = L.map('map', {preferCanvas: true, zoomControl: false, rotate: !!L.Map.prototype.setBearing, bearing: 0, rotateControl: false, touchRotate: false, shiftKeyRotate: false, compassBearing: false}).setView([35.52, 139.66], 10);
 L.control.zoom({position: 'topright'}).addTo(map);
 const pale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
   maxZoom: 18,
@@ -88,7 +88,7 @@ const curYear = () => +$('slider').value;
 
 // ---------- データ ----------
 async function load() {
-  const r = await fetch('rails.json?v=7');
+  const r = await fetch('rails.json?v=8');
   if (!r.ok) throw new Error('rails.json: HTTP ' + r.status);
   const d = await r.json();
   LN = d.L;
@@ -132,13 +132,13 @@ function era(y) {
   if (y >= 1912) return f('大正', y - 1911);
   return f('明治', y - 1867);
 }
-const trainIcon = y => y < 1925 ? '🚂' : y < 1964 ? '🚃' : '🚄';
+const trainIcon = (y, cat) => cat === 'shin' ? '🚄' : cat === 'tram' ? '🚋' : y < 1925 ? '🚂' : '🚃';
 
 // ---------- 描きかた ----------
 // ポップアップがパネルの下に隠れないように、パネルのある側に余白をとる
 let PP = {};
 function popPad() {
-  const c = ['panel', 'menu', 'quiz', 'story', 'cmp', 'ride', 'me'].map($).find(e => getComputedStyle(e).display !== 'none');
+  const c = ['panel', 'menu', 'quiz', 'story', 'cmp', 'ride', 'me', 'haisen'].map($).find(e => getComputedStyle(e).display !== 'none');
   const tl = [20, 20], br = [20, 20];
   if (c) { const r = c.getBoundingClientRect(), H = innerHeight; if (r.top < H / 2) tl[1] = r.bottom + 10; else br[1] = H - r.top + 10; }
   PP = {autoPanPaddingTopLeft: tl, autoPanPaddingBottomRight: br};
@@ -185,6 +185,7 @@ function labels(y) {
 
 function draw(y, animate) {
   if (cmp.on) return drawCompare();
+  if (haisen.on) return drawHaisen();
   const g = ++gen;
   layer.clearLayers(); fx.clearLayers(); popPad();
   const z = map.getZoom(), newP = [], newSt = [];
@@ -276,7 +277,7 @@ function animateYear(y, order, newP, g) {
     const pts = ta <= tb ? p.pts : p.pts.slice().reverse();
     // 列車は前の列車が走り終えてから（同じ場所に重ならないように）
     let icon = null;
-    if (trains < 6 && due >= freeAt && pathLen(pts) > 0.008) { icon = trainIcon(y); trains++; freeAt = due + dur; }
+    if (trains < 6 && due >= freeAt && pathLen(pts) > 0.008) { icon = trainIcon(y, p.cat); trains++; freeAt = due + dur; }
     setTimeout(() => { if (g === gen) growLine(p, pts, dur, icon, g); }, Math.max(ta, tb));
   }
 }
@@ -313,10 +314,13 @@ function growLine(p, pts, dur, icon, g) {
 
 // ---------- 背景（時代の色合い・空中写真） ----------
 function background(y) {
+  const night = !RIDING && opt.bg === 'night';
+  document.body.classList.toggle('night', night);
   const t = clamp((1970 - y) / 90, 0, 1), c = pale.getContainer();
-  if (c) c.style.filter = `sepia(${t}) saturate(${1 - .3 * t}) brightness(${1 - .06 * t})`;
+  if (c) c.style.filter = night ? 'invert(1) hue-rotate(180deg) brightness(.7) contrast(1.15) saturate(.45)' : `sepia(${t}) saturate(${1 - .3 * t}) brightness(${1 - .06 * t})`;
   let note = '';
-  const ph = opt.bg === 'photo' ? PHOTOS.find(p => y >= p[0] && y <= p[1]) : null;
+  const wantPhoto = RIDING ? $('rScene').value === 'auto' : opt.bg === 'photo';
+  const ph = wantPhoto ? PHOTOS.find(p => y >= p[0] && y <= p[1]) : null;
   if (ph) {
     if (photoId !== ph[2]) {
       if (photo) map.removeLayer(photo);
@@ -328,7 +332,7 @@ function background(y) {
     note = '空中写真：' + ph[3] + (map.getZoom() < 10 && ph[2] !== 'seamlessphoto' ? '（拡大すると表示）' : '');
   } else {
     if (photo) { map.removeLayer(photo); photo = null; photoId = ''; }
-    if (opt.bg === 'photo') note = 'この時代の空中写真はありません';
+    if (wantPhoto) note = RIDING ? 'この時代の空中写真はないので、地図で走ります' : 'この時代の空中写真はありません';
   }
   if (quiz.on && quiz.mode === 'year' && quiz.phase === 'ask') note = '';
   $('bgNote').textContent = note;
@@ -484,7 +488,7 @@ $('find').onclick = findStation;
 $('q').onkeydown = e => { if (e.key === 'Enter') findStation(); };
 
 // ---------- パネルの切り替え ----------
-function showCard(name) { for (const c of ['panel', 'menu', 'quiz', 'story', 'cmp', 'ride', 'me']) $(c).style.display = c === name ? 'block' : 'none'; }
+function showCard(name) { if (name !== 'haisen' && typeof haisen !== 'undefined') haisen.on = false; for (const c of ['panel', 'menu', 'quiz', 'story', 'cmp', 'ride', 'me', 'haisen']) $(c).style.display = c === name ? 'block' : 'none'; }
 
 // ---------- クイズ（3種類） ----------
 const quiz = {on: false, n: 0, score: 0, t: null, ring: null, phase: '', mode: '', ans: null};
@@ -627,7 +631,7 @@ function storyStart(li) {
   showCard('story'); $('sPick').style.display = 'none'; $('sMain').style.display = 'block';
   $('sTitle').textContent = '📖 ' + LN[li];
   const pts = ps.flatMap(p => [p.pts[0], p.pts[p.pts.length - 1]]).concat(ids.map(ll));
-  if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.12));
+  if (pts.length) fitVisible(L.latLngBounds(pts).pad(0.05), false);
   setTimeout(() => storyGo(0, true), 700);
 }
 function storyGo(k, animate) {
@@ -716,8 +720,9 @@ $('cmpA').oninput = $('cmpB').oninput = drawCompare;
 })();
 
 // ---------- 版の表示とお知らせ ----------
-const APP_VER = 7;
+const APP_VER = 8;
 const HISTORY = [
+  [8, ['🚂 乗ってみるに「眺め」：前を見る（進む方向が上）・横の窓・北が上を選べる', '乗車中は、その時代の空中写真の上を走る（1945年より前はセピア色の地図）', '👻 廃線探検：廃止された区間を光らせ、一覧から選ぶと場所と年代、最後の年に乗ることも', '🌙 夜の地図：背景を暗くして線路が光って見える']],
   [7, ['パネルを1段にまとめ、道具は「≡ メニュー」へ。ボタンを大きく、駅の点も押しやすく', '色の凡例をいつも表示。廃線は灰色の点線に', '⭐ 見どころ再生（静かな年は早送り）と、再生する期間の指定', '🚂 乗ってみるが本格的に：切符と改札、発車の音（汽笛・発車ベル・発車メロディ）、ガタンゴトン、加速と減速、揺れ、速度計と時計、車内の文字案内', '🔗 この画面を共有（年・場所・路線をリンクで送れる）', '初めての人向けの使い方案内、パソコンのキー操作（スペース：再生、←→：1年、Shift＋←→：10年、M：メニュー）']],
   [6, ['🚂「乗ってみる」：その時代の列車に乗って、駅名標を見ながら路線を走る（当時の所要時間の目安つき）', '🎂「わたしの年表」：生まれた年を入れると、同い年の駅や、年ごとの自分の年齢が地図に出る']],
   [5, ['何版かを表示し、版が変わったらお知らせ', 'パネルを好きな場所へ動かせる・たためる（再生中だけ小さくもできる）', '📍「この辺りの鉄道史」：地図の場所を選ぶ（長押し・右クリックでも）と、その辺りに鉄道が来た年と駅の年表', 'クイズが3種類に：「この路線図は何年？」「光っている路線はどれ？」を追加']],
@@ -1034,15 +1039,16 @@ function rideStart(li, y, rev, R0route) {
   const R = R0route || buildRoute(li, y, rev);
   if (!R || R.total < 0.3 || R.stops.length < 2) { toast('この路線は短すぎて乗れませんでした', 3000); return; }
   Object.assign(ride, {on: true, li, y, R, pos: 0, next: 0, dwell: 2.4, paused: false, rev, ti: 0, sim: 0, lastStop: 0, jointT: 0, bump: 0, squealed: false, ledText: '', top: eraTop(y, R.cat), departing: true});
-  focus = li; $('slider').value = y; draw(y, false); RIDING = true; legend();
+  haisen.on = false; RIDING = true; focus = li; $('slider').value = y; draw(y, false); legend();
   showCard('ride'); $('rPick').style.display = 'none'; $('rMain').style.display = 'block';
   $('rTitle').textContent = '';
   $('ride').querySelector('.gl').textContent = `⠿ 🚂 ${LN[li]}（${y}年・${era(y)}）`;
   $('rPause').textContent = '❚❚';
   ride.trail = L.polyline([R.pts[0]], {renderer: R0, interactive: false, color: '#ff8f00', weight: 6, opacity: .8}).addTo(rideLayer);
-  ride.mk = L.marker(R.pts[0], {icon: L.divIcon({className: 'train', html: R.cat === 'shin' ? '🚄' : R.cat === 'tram' ? '🚋' : trainIcon(y), iconSize: [22, 22]}), interactive: false, zIndexOffset: 1000}).addTo(rideLayer);
+  ride.mk = L.marker(R.pts[0], {icon: L.divIcon({className: 'train', html: trainIcon(y, R.cat), iconSize: [22, 22]}), interactive: false, zIndexOffset: 1000}).addTo(rideLayer);
   map.setView(R.pts[0], 14, {animate: false});
   ride.dest = stName(S[R.stops[R.stops.length - 1].i]);
+  ride.bear = targetBearing(R, 0); if (map.setBearing) map.setBearing($('rView').value === 'north' ? 0 : ride.bear);
   if (R.stops[0].km < 0.05) { board(0); ride.next = 1; }
   led(`この列車は ${ride.dest}ゆきです　まもなく発車します`);
   rumbleStart(); departSound(true);
@@ -1054,7 +1060,8 @@ function rideStop() {
   if (ride.mk) rideLayer.removeLayer(ride.mk); if (ride.trail) rideLayer.removeLayer(ride.trail);
   ride.mk = ride.trail = null;
   $('map').style.transform = '';
-  RIDING = false; legend();
+  if (map.setBearing) map.setBearing(0);
+  const was = RIDING; RIDING = false; legend(); if (was) background(curYear());
 }
 const hm = m => { m = Math.round(m); return m >= 60 ? `${Math.floor(m / 60)}時間${m % 60}分` : `${m}分`; };
 function board(arrived) {
@@ -1082,9 +1089,20 @@ function meter(kmh) {
   $('rClock').textContent = `時刻 ${clockStr(ride.sim)}（9:00発・当時の目安）`;
 }
 // 列車がパネルに隠れないよう、地図の見えている部分の真ん中に置く
+// 進む向き（北=0度、時計回り）
+function headingAt(R, d) {
+  const a = pointAt(R, Math.max(0, d - .05))[0], b = pointAt(R, Math.min(R.total, d + .3))[0];
+  return Math.atan2((b[1] - a[1]) * Math.cos(a[0] * Math.PI / 180), b[0] - a[0]) * 180 / Math.PI;
+}
+const angDiff = (a, b) => ((a - b + 540) % 360) - 180;
+// 地図は「向き」の分だけ時計回りに回るので、進む向きを上（前）・右（横の窓）にするには逆に回す
+const targetBearing = (R, d) => $('rView').value === 'side' ? 90 - headingAt(R, d) : -headingAt(R, d);
 function followTrain(pt) {
   const W = map.getSize().x, H = map.getSize().y, r = $('ride').getBoundingClientRect();
-  const cy = (r.top + r.bottom) / 2 > H / 2 ? Math.max(40, r.top / 2) : Math.min(H - 40, (r.bottom + H) / 2);
+  const bottomCard = (r.top + r.bottom) / 2 > H / 2;
+  const top = bottomCard ? 0 : r.bottom, bot = bottomCard ? r.top : H;
+  const k = $('rView').value === 'front' ? .72 : .5;  // 前を見るときは列車を下寄りに
+  const cy = clamp(top + (bot - top) * k, 40, H - 40);
   const p = map.latLngToContainerPoint(pt);
   map.panBy([p.x - W / 2, p.y - cy], {animate: false});
 }
@@ -1118,6 +1136,11 @@ function rideStep(now) {
   while (ride.ti < idx) { ride.ti++; ride.trail.addLatLng(R.pts[ride.ti]); }
   const tl = ride.trail.getLatLngs(); if (tl.length > ride.ti + 1) tl.pop();
   ride.trail.addLatLng(pt);
+  if (map.setBearing && $('rView').value !== 'north') {
+    const tb = targetBearing(R, ride.pos);
+    ride.bear += angDiff(tb, ride.bear) * Math.min(1, dt * 2.5);
+    map.setBearing(ride.bear);
+  }
   ride.mk.setLatLng(pt); followTrain(pt);
   // 揺れ
   if (opt.shake && !REDUCED && !ride.paused) {
@@ -1139,8 +1162,75 @@ $('rPause').onclick = () => {
 };
 $('rSpeed').onchange = () => { ride.speed = +$('rSpeed').value; };
 $('rRev').onclick = () => { if ($('rSound').checked) ac(); rideStart(ride.li, ride.y, !ride.rev); };
+$('rView').onchange = () => { if (!map.setBearing) return; if ($('rView').value === 'north') map.setBearing(0); else if (ride.R) { ride.bear = targetBearing(ride.R, ride.pos); map.setBearing(ride.bear); } };
+$('rScene').onchange = () => { if (RIDING) background(ride.y); };
 $('rSound').onchange = () => { if ($('rSound').checked) { ac(); if (ride.on && !ride.rumble) rumbleStart(); } else rumbleStop(); };
 $('rQuit').onclick = () => { $('ride').querySelector('.gl').textContent = '⠿ 🚂 乗ってみる'; rideStop(); focus = null; showCard('panel'); map.setZoom(11); draw(curYear(), false); };
+
+// 地図の、パネルに隠れていない部分に収まるように表示する
+function fitVisible(b, fly) {
+  const c = ['panel', 'menu', 'quiz', 'story', 'cmp', 'ride', 'me', 'haisen'].map($).find(e => getComputedStyle(e).display !== 'none');
+  const H = map.getSize().y, o = {paddingTopLeft: [20, 20], paddingBottomRight: [20, 20], duration: .8};
+  if (c) { const r = c.getBoundingClientRect(); if ((r.top + r.bottom) / 2 > H / 2) o.paddingBottomRight[1] = H - r.top + 10; else o.paddingTopLeft[1] = r.bottom + 10; }
+  if (fly) map.flyToBounds(b, o); else map.fitBounds(b, o);
+}
+// ---------- 👻 廃線探検 ----------
+const haisen = {on: false, sel: null, list: []};
+function haisenLines() {
+  const m = new Map();
+  for (const p of P) {
+    if (!p.g) continue;
+    const r = m.get(p.l) || {l: p.l, end: 0, len: 0, cat: p.cat};
+    r.end = Math.max(r.end, p.e); r.len += plen(p.pts); m.set(p.l, r);
+  }
+  const out = [...m.values()].filter(r => r.len >= .8);
+  for (const r of out) {
+    r.start = Math.min(...P.filter(p => p.l === r.l).map(p => p.s));
+    r.all = !P.some(p => p.l === r.l && present(p, Y1));
+  }
+  return out;
+}
+function haisenOpen() {
+  stop(); map.closePopup(); storyAuto(false); focus = null;
+  if (!haisen.list.length) haisen.list = haisenLines();
+  showCard('haisen'); haisen.on = true; haisen.sel = null;
+  $('hInfo').innerHTML = '一覧から路線を選ぶと、場所と年代を表示します';
+  haisenList(); drawHaisen();
+  map.flyTo([35.62, 139.62], 10, {duration: .8});
+}
+function haisenList() {
+  const k = $('hSort').value, L2 = haisen.list.filter(r => !$('hAll').checked || r.all);
+  L2.sort(k === 'len' ? (a, b) => b.len - a.len : k === 'name' ? (a, b) => LN[a.l].localeCompare(LN[b.l], 'ja') : (a, b) => b.end - a.end);
+  $('hCount').textContent = `${L2.length}路線`;
+  $('hList').innerHTML = L2.map(r => `<button data-l="${r.l}" class="${haisen.sel === r.l ? 'on' : ''}"><span><span class="sw" style="background:${CATS[r.cat].color}"></span> ${esc(LN[r.l])}</span><small>${r.start}〜${r.end}年・${r.len.toFixed(1)}km${r.all ? '・全線廃止' : ''}</small></button>`).join('');
+  $('hList').querySelectorAll('button').forEach(b => { b.onclick = () => haisenSelect(+b.dataset.l); });
+}
+function haisenSelect(l) {
+  haisen.sel = l;
+  const r = haisen.list.find(x => x.l === l);
+  $('hInfo').innerHTML = `<b>${esc(LN[l])}</b>：${r.start}年に開業、${r.end + 1}年に${r.all ? '全線' : '一部の区間が'}廃止（廃止区間は約${r.len.toFixed(1)}km）
+    <div class="row"><button id="hRide">🚂 ${r.end}年の${esc(LN[l])}に乗る</button><button id="hStory">📖 ものがたり</button></div>`;
+  $('hRide').onclick = () => { haisen.on = false; showTicket(l, r.end, false); };
+  $('hStory').onclick = () => { haisen.on = false; storyStart(l); };
+  haisenList(); drawHaisen();
+  const pts = P.filter(p => p.l === l && p.g).flatMap(p => p.pts);
+  if (pts.length) fitVisible(L.latLngBounds(pts).pad(.1), true);
+}
+function drawHaisen() {
+  ++gen; layer.clearLayers(); fx.clearLayers(); lbl.clearLayers(); popPad();
+  for (const p of P) if (present(p, Y1) && !(haisen.sel === p.l)) line(p, 'faint', layer, R0);
+  for (const p of P) {
+    if (!p.g) continue;
+    const sel = haisen.sel === p.l, dim = haisen.sel != null && !sel;
+    if (sel) L.polyline(p.pts, {renderer: R0, interactive: false, color: '#ffd54f', weight: 10, opacity: .7}).addTo(fx);
+    L.polyline(p.pts, {renderer: R0, interactive: false, color: CATS[p.cat].color, weight: sel ? 4 : 2.5, opacity: dim ? .3 : .95, dashArray: sel ? null : '6 4'}).addTo(sel ? fx : layer);
+  }
+  if (haisen.sel != null) for (const s of S) if (s.c && s.ls.some(t => t[0] === haisen.sel)) dot(s.i, 'closed', fx, R0);
+  background(Y1);
+}
+$('haisenBtn').onclick = haisenOpen;
+$('hSort').onchange = $('hAll').onchange = haisenList;
+$('hQuit').onclick = () => { haisen.on = false; showCard('panel'); draw(curYear(), false); };
 
 // ---------- 使い方の案内 ----------
 const GUIDE = [
