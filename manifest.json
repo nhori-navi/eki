@@ -1,0 +1,17 @@
+{
+  "name": "鉄道のひろがり",
+  "short_name": "鉄道のひろがり",
+  "description": "新橋開業から現在まで、首都圏の鉄道が広がっていく様子を地図で見る",
+  "id": "/eki/",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbf6ea",
+  "theme_color": "#1f4e79",
+  "lang": "ja",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
