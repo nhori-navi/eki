@@ -44,7 +44,7 @@ input[type=text]{width:8.5em}
 .cardS .cn{font-size:17px;font-weight:700}
 .cardS .cl{font-size:11px;color:var(--sub);margin-bottom:4px}
 .cardS button{font-size:12px;padding:3px 7px}
-#quiz,#story,#cmp{display:none}
+#quiz,#story,#cmp,#ride,#me{display:none}
 #qName{font-size:24px;font-weight:700;margin-top:4px}
 #qLine{font-size:12px;color:var(--sub)}
 #qYear{font-size:30px;font-weight:700}
@@ -69,6 +69,12 @@ input[type=text]{width:8.5em}
 .qc.ng{background:#fde8e6;border-color:#c62828}
 .tl{display:flex;gap:6px;align-items:baseline;font-size:12px;margin-top:2px}
 .tl button{font-size:11px;padding:1px 5px;min-width:3.6em}
+.board{display:flex;align-items:stretch;background:#fff;border:2px solid #333;border-top:8px solid #2e8b57;border-radius:6px;margin-top:6px;min-height:64px}
+.board .bc{flex:1.6;text-align:center;padding:4px 2px;border-left:1px solid #ccc;border-right:1px solid #ccc}
+.board .bc b{display:block;font-size:24px;line-height:1.2;letter-spacing:2px}
+.board .bc small{display:block;font-size:11px;color:#555}
+.board .bl,.board .br{flex:1;display:flex;align-items:center;justify-content:center;font-size:12px;color:#333;padding:2px;text-align:center}
+.board .bl::before{content:"◀ ";color:#999}.board .br::after{content:" ▶";color:#999}
 </style></head><body>
 <div id="map"></div>
 <div id="msg">線路データを読み込み中…</div>
@@ -99,6 +105,8 @@ input[type=text]{width:8.5em}
       <button id="placeBtn" title="地図の場所を選んで、その辺りの鉄道史を見る">📍 この辺り</button>
       <button id="quizBtn">🎓 クイズ</button>
       <button id="storyBtn">📖 ものがたり</button>
+      <button id="rideBtn">🚂 乗る</button>
+      <button id="meBtn">🎂 わたし</button>
       <button id="cmpBtn">↔ 比べる</button>
       <button id="optBtn">⚙ 表示</button>
     </div>
@@ -177,9 +185,39 @@ input[type=text]{width:8.5em}
   </div>
 </div>
 
+<div id="ride" class="card">
+  <div class="grip" data-card="ride"><span class="gl">⠿ 🚂 乗ってみる</span><button class="fold" title="たたむ／ひろげる">▾</button></div>
+  <div class="more">
+    <div id="rPick">
+      <div style="font-size:12px;color:var(--sub)">その年の列車に乗って、路線を端から端まで走ります。駅に着くたびに駅名標が変わります</div>
+      <div class="row"><input type="text" id="rLine" list="lineNames" placeholder="例：中央線" style="width:11em">
+        <label>年 <input type="number" id="rYear" min="1872" style="width:5.5em"></label>
+        <button id="rGo">乗る</button><button id="rCancel" style="margin-left:auto">閉じる</button></div>
+    </div>
+    <div id="rMain" style="display:none">
+      <div class="head"><b id="rTitle" style="font-size:15px"></b></div>
+      <div id="rBoard" class="board"></div>
+      <div id="rInfo" style="font-size:12px;margin-top:4px"></div>
+      <div class="row"><button id="rPause">❚❚</button>
+        <select id="rSpeed"><option value="0.5">×0.5</option><option value="1" selected>×1</option><option value="2">×2</option><option value="4">×4</option></select>
+        <button id="rRev">⇄ 逆向き</button><button id="rQuit" style="margin-left:auto">降りる</button></div>
+    </div>
+  </div>
+</div>
+
+<div id="me" class="card">
+  <div class="grip" data-card="me"><span class="gl">⠿ 🎂 わたしの年表</span><button class="fold" title="たたむ／ひろげる">▾</button></div>
+  <div class="more">
+    <div class="row"><label>生まれた年 <input type="number" id="birth" min="1872" style="width:6em" placeholder="例：1973"></label>
+      <button id="meGo">見る</button><button id="meClear" style="font-size:12px">消す</button><button id="meQuit" style="margin-left:auto">閉じる</button></div>
+    <div style="font-size:11px;color:var(--sub);margin-top:2px">入れた年はこの端末にだけ記録します。パネルの年の横に、その年のあなたの年齢が出ます</div>
+    <div id="meRes" style="font-size:13px;line-height:1.7;margin-top:6px"></div>
+  </div>
+</div>
+
 <script>
 // 読み込み中に問題が起きたら、止まったままにせず画面に出す
 window.addEventListener('error', e => { const m = document.getElementById('msg'); if (m && m.style.display !== 'none') m.textContent = '問題が起きました：' + (e.message || '') + '（ページを再読み込みしてください）'; });
 </script>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 </body></html>
