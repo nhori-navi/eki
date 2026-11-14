@@ -15,3 +15,6 @@
 - rails.json：線路と駅のデータ（首都圏）
 - tools/build_rails.py：国土数値情報のzipから rails.json を作るスクリプト（`python build_rails.py <UTF-8フォルダ>/ rails.json`、shapely が必要）
 - manifest.json / sw.js / icon-*.png：ホーム画面に追加して使うためのファイル（受け持ち範囲は /eki/ のみ、キャッシュ名は "eki" で始まるもののみ）
+
+## 版
+いまは第5版。版ごとの変更点は、アプリの「⚙ 表示」→「この版について」で見られます。更新するときは app.js の APP_VER と HISTORY、index.html と app.js の `?v=番号`、sw.js の CACHE（eki-v番号）をそろえて上げます。

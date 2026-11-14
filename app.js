@@ -3,6 +3,9 @@
 // 線路と駅：国土数値情報（鉄道時系列）を加工した rails.json
 const Y0 = 1872, Y1 = new Date().getFullYear();
 const PREF = 'eki_pref_v1';
+// 前の版から使っている人か（古い版の仕組みがこのページを受け持っているか）を最初に確かめておく
+const HAD_SW = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+const T0 = Date.now();
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -83,7 +86,7 @@ const curYear = () => +$('slider').value;
 
 // ---------- データ ----------
 async function load() {
-  const r = await fetch('rails.json?v=4');
+  const r = await fetch('rails.json?v=5');
   if (!r.ok) throw new Error('rails.json: HTTP ' + r.status);
   const d = await r.json();
   LN = d.L;
@@ -130,6 +133,15 @@ function era(y) {
 const trainIcon = y => y < 1925 ? '🚂' : y < 1964 ? '🚃' : '🚄';
 
 // ---------- 描きかた ----------
+// ポップアップがパネルの下に隠れないように、パネルのある側に余白をとる
+let PP = {};
+function popPad() {
+  const c = ['panel', 'quiz', 'story', 'cmp'].map($).find(e => getComputedStyle(e).display !== 'none');
+  const tl = [20, 20], br = [20, 20];
+  if (c) { const r = c.getBoundingClientRect(), H = innerHeight; if (r.top < H / 2) tl[1] = r.bottom + 10; else br[1] = H - r.top + 10; }
+  PP = {autoPanPaddingTopLeft: tl, autoPanPaddingBottomRight: br};
+  return PP;
+}
 function line(p, style, G, R, pts) {
   const col = CATS[p.cat].color, ph = opt.bg === 'photo';
   const base = {renderer: R, interactive: false, smoothFactor: 1.2};
@@ -155,12 +167,12 @@ function dot(i, style, G, R) {
     new: {radius: 6, weight: 2, color: '#c62828', fillColor: '#ffd54f', fillOpacity: 1}
   }[style];
   const m = L.circleMarker(ll(i), {renderer: R, ...st}).addTo(G);
-  if (!quiz.on && style !== 'faint') m.bindPopup(() => card(i), {maxWidth: 280});
+  if (!quiz.on && style !== 'faint') m.bindPopup(() => card(i), {maxWidth: 280, ...PP});
   return m;
 }
 function labels(y) {
   lbl.clearLayers();
-  if (map.getZoom() < 14 || cmp.on) return;
+  if (map.getZoom() < 14 || cmp.on || quiz.on) return;
   const b = map.getBounds(); let n = 0;
   for (const s of S) {
     if (!isOpen(s, y) || !stOn(s) || !onLineS(s) || !b.contains([s.lat, s.lon])) continue;
@@ -172,14 +184,14 @@ function labels(y) {
 function draw(y, animate) {
   if (cmp.on) return drawCompare();
   const g = ++gen;
-  layer.clearLayers(); fx.clearLayers();
+  layer.clearLayers(); fx.clearLayers(); popPad();
   const z = map.getZoom(), newP = [], newSt = [];
   for (const p of P) {
     if (!opt.cats[p.cat]) continue;
     const fo = onLineP(p);
     if (present(p, y)) {
       if (isNewP(p, y) && fo) newP.push(p);
-      else line(p, !fo ? 'faint' : opt.emph ? 'base' : 'full', layer, R0);
+      else line(p, !fo ? 'faint' : (opt.emph && !(quiz.on && quiz.mode === 'line')) ? 'base' : 'full', layer, R0);
     } else if (opt.ghost && ghostAt(p, y)) line(p, 'ghost', layer, R0);
   }
   let shown = 0;
@@ -311,6 +323,7 @@ function background(y) {
     if (photo) { map.removeLayer(photo); photo = null; photoId = ''; }
     if (opt.bg === 'photo') note = 'この時代の空中写真はありません';
   }
+  if (quiz.on && quiz.mode === 'year' && quiz.phase === 'ask') note = '';
   $('bgNote').textContent = note;
   $('bgNote').style.display = note ? 'block' : 'none';
 }
@@ -371,7 +384,8 @@ function card(i) {
 map.on('popupopen', e => {
   e.popup.getElement().querySelectorAll('button[data-act]').forEach(b => {
     b.onclick = () => {
-      if (b.dataset.act === 'year') goStation(+b.dataset.id, false);
+      if (b.dataset.act === 'jumpy') jump(+b.dataset.y);
+      else if (b.dataset.act === 'year') goStation(+b.dataset.id, false);
       else { map.closePopup(); if (cmp.on) cmpEnd(); if (quiz.on) qQuit(); storyStart(+b.dataset.line); }
     };
   });
@@ -380,12 +394,12 @@ function goStation(i, fly) {
   const s = S[i];
   stop(); $('slider').value = s.o; draw(s.o, false);
   if (fly) map.flyTo(ll(i), 13, {duration: 1.2});
-  setTimeout(() => L.popup({maxWidth: 280}).setLatLng(ll(i)).setContent(card(i)).openOn(map), fly ? 1300 : 50);
+  setTimeout(() => L.popup({maxWidth: 280, ...popPad()}).setLatLng(ll(i)).setContent(card(i)).openOn(map), fly ? 1300 : 50);
 }
 
 // ---------- 再生 ----------
 let timer = null, playing = false;
-function stop() { playing = false; clearTimeout(timer); $('play').textContent = '▶'; }
+function stop() { const was = playing; playing = false; clearTimeout(timer); $('play').textContent = '▶'; if (was && typeof autoFold === 'function') autoFold(false); }
 function tick() {
   const y = curYear() + 1;
   if (y > Y1) return stop();
@@ -394,7 +408,7 @@ function tick() {
 }
 $('play').onclick = () => {
   if (playing) return stop();
-  playing = true; $('play').textContent = '❚❚';
+  playing = true; $('play').textContent = '❚❚'; autoFold(true);
   if (curYear() >= Y1) { $('slider').value = Y0; draw(Y0, true); timer = setTimeout(tick, delay(Y0)); }
   else tick();
 };
@@ -439,58 +453,122 @@ $('q').onkeydown = e => { if (e.key === 'Enter') findStation(); };
 // ---------- パネルの切り替え ----------
 function showCard(name) { for (const c of ['panel', 'quiz', 'story', 'cmp']) $(c).style.display = c === name ? 'block' : 'none'; }
 
-// ---------- クイズ：この駅、何年生まれ？ ----------
-const quiz = {on: false, n: 0, score: 0, t: null, ring: null, phase: ''};
+// ---------- クイズ（3種類） ----------
+const quiz = {on: false, n: 0, score: 0, t: null, ring: null, phase: '', mode: '', ans: null};
 const TOTAL = 5;
+const rnd = n => Math.floor(Math.random() * n);
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 function qShowYear() { const v = +$('qSlider').value; $('qYear').textContent = v; $('qEra').textContent = era(v); }
 $('qSlider').max = Y1; $('qSlider').oninput = qShowYear;
-function qStart() {
+function qMenu() {
   if (!S.length) return;
-  stop(); map.closePopup(); Object.assign(quiz, {on: true, n: 0, score: 0});
-  showCard('quiz'); qNext();
+  stop(); map.closePopup(); storyAuto(false); focus = null;
+  quiz.on = false; if (quiz.ring) { map.removeLayer(quiz.ring); quiz.ring = null; }
+  showCard('quiz'); $('qMenu').style.display = 'block'; $('qMain').style.display = 'none';
+}
+function qBegin(mode) {
+  Object.assign(quiz, {on: true, n: 0, score: 0, mode});
+  $('qMenu').style.display = 'none'; $('qMain').style.display = 'block';
+  qNext();
+}
+function qLineFirst(li) {
+  let y = 9999;
+  for (const p of P) if (p.l === li && p.s < y) y = p.s;
+  for (const s of S) for (const [l, o] of s.ls) if (l === li && o < y) y = o;
+  return y;
 }
 function qNext() {
   if (quiz.n >= TOTAL) return qEnd();
   quiz.n++; quiz.phase = 'ask';
-  const pool = S.filter(s => s.c == null && stOn(s) && !/（/.test(s.n));
-  const s = pool[Math.floor(Math.random() * pool.length)];
-  quiz.t = s.i;
-  $('slider').value = Y1; draw(Y1, false);
-  $('qHead').textContent = `第${quiz.n}問／全${TOTAL}問　この駅、何年生まれ？`;
+  if (quiz.ring) { map.removeLayer(quiz.ring); quiz.ring = null; }
   $('qScore').textContent = quiz.score + '点';
-  $('qName').textContent = s.n; $('qLine').textContent = s.ls.map(([l]) => LN[l]).join('・');
+  $('qRes').innerHTML = ''; $('qNext').style.display = 'none'; $('qChoices').innerHTML = '';
+  $('qAsk').style.display = quiz.mode === 'line' ? 'none' : 'block';
   $('qSlider').value = 1930; qShowYear();
-  $('qAsk').style.display = 'block'; $('qRes').innerHTML = ''; $('qNext').style.display = 'none';
-  if (quiz.ring) map.removeLayer(quiz.ring);
-  quiz.ring = L.marker(ll(s.i), {icon: L.divIcon({className: '', html: '<div class="pulse"></div>', iconSize: [30, 30]}), interactive: false}).addTo(map);
-  map.flyTo(ll(s.i), 12, {duration: 1});
+  const head = `第${quiz.n}問／全${TOTAL}問　`;
+  if (quiz.mode === 'station') {
+    focus = null;
+    const pool = S.filter(s => s.c == null && stOn(s) && !/（/.test(s.n));
+    const s = pool[rnd(pool.length)];
+    quiz.t = s.i;
+    $('slider').value = Y1; draw(Y1, false);
+    $('qHead').textContent = head + 'この駅、何年生まれ？';
+    $('qName').textContent = s.n; $('qLine').textContent = s.ls.map(([l]) => LN[l]).join('・');
+    quiz.ring = L.marker(ll(s.i), {icon: L.divIcon({className: '', html: '<div class="pulse"></div>', iconSize: [30, 30]}), interactive: false}).addTo(map);
+    map.flyTo(ll(s.i), 12, {duration: 1});
+  } else if (quiz.mode === 'year') {
+    focus = null;
+    const y = 1880 + rnd(Y1 - 1880);
+    quiz.ans = y;
+    $('slider').value = y; draw(y, false);
+    map.flyTo([35.52, 139.66], 10, {duration: 1});
+    $('qHead').textContent = head + 'この路線図は何年？';
+    $('qName').textContent = '🗾 何年の路線図でしょう？';
+    $('qLine').textContent = '線路の広がり具合や地図の色合いから当ててください';
+  } else {
+    const now = new Set(P.filter(p => present(p, Y1)).map(p => p.l));
+    const pool = lineList.filter(l => now.has(l) && S.filter(s => isOpen(s, Y1) && s.ls.some(t => t[0] === l)).length >= 5);
+    const li = pool[rnd(pool.length)];
+    quiz.ans = li;
+    const cat = (P.find(p => p.l === li) || {}).cat;
+    const same = shuffle(pool.filter(l => l !== li && (P.find(p => p.l === l) || {}).cat === cat));
+    const other = shuffle(pool.filter(l => l !== li && !same.includes(l)));
+    const choices = shuffle([li, ...same.concat(other).slice(0, 3)]);
+    focus = li;
+    $('slider').value = Y1; draw(Y1, false);
+    const pts = P.filter(p => p.l === li).flatMap(p => [p.pts[0], p.pts[p.pts.length - 1]]);
+    if (pts.length) map.flyToBounds(L.latLngBounds(pts).pad(0.25), {duration: 1});
+    $('qHead').textContent = head + '光っている路線はどれ？';
+    $('qName').textContent = '🛤 この路線の名前は？';
+    $('qLine').textContent = '色の付いた線と白い駅が、その路線です';
+    $('qChoices').innerHTML = choices.map(l => `<button class="qc" data-l="${l}">${esc(LN[l])}</button>`).join('');
+    $('qChoices').querySelectorAll('button').forEach(b => { b.onclick = () => qAnswer(+b.dataset.l); });
+  }
 }
-function qAnswer() {
-  const s = S[quiz.t], g = +$('qSlider').value, d = Math.abs(g - s.o), p = Math.max(0, 100 - d * 4);
-  quiz.score += p; quiz.phase = 'res';
-  const word = d === 0 ? '🎯 ぴったり！' : d <= 3 ? '惜しい！' : d <= 10 ? 'いい線！' : 'これは難問…';
-  $('qRes').innerHTML = `${word} 正解は <b>${s.o}年（${era(s.o)}）</b>。差は${d}年で <b>${p}点</b>`;
+function qAnswer(choice) {
+  if (quiz.phase !== 'ask') return;
+  quiz.phase = 'res';
+  let p = 0, html = '';
+  if (quiz.mode === 'station') {
+    const s = S[quiz.t], g = +$('qSlider').value, d = Math.abs(g - s.o); p = Math.max(0, 100 - d * 4);
+    const word = d === 0 ? '🎯 ぴったり！' : d <= 3 ? '惜しい！' : d <= 10 ? 'いい線！' : 'これは難問…';
+    html = `${word} 正解は <b>${s.o}年（${era(s.o)}）</b>。差は${d}年で <b>${p}点</b>`;
+    $('slider').value = s.o; draw(s.o, true);
+  } else if (quiz.mode === 'year') {
+    const y = quiz.ans, g = +$('qSlider').value, d = Math.abs(g - y); p = Math.max(0, 100 - d * 3);
+    const word = d === 0 ? '🎯 ぴったり！' : d <= 3 ? '惜しい！' : d <= 10 ? 'いい線！' : 'これは難問…';
+    html = `${word} 正解は <b>${y}年（${era(y)}）</b>。差は${d}年で <b>${p}点</b>` + (EV[y] ? `<br><span style="color:#6b5a44">この年：${esc(EV[y])}</span>` : '');
+    background(y);
+  } else {
+    const li = quiz.ans, ok = choice === li; p = ok ? 100 : 0;
+    $('qChoices').querySelectorAll('button').forEach(b => { const l = +b.dataset.l; b.disabled = true; if (l === li) b.classList.add('ok'); else if (l === choice) b.classList.add('ng'); });
+    html = `${ok ? '⭕ 正解！' : '❌ 残念…'} 正解は <b>${esc(LN[li])}</b>（${qLineFirst(li)}年に開業）。<b>${p}点</b>`;
+  }
+  quiz.score += p;
+  $('qRes').innerHTML = html;
   $('qScore').textContent = quiz.score + '点';
   $('qAsk').style.display = 'none';
   $('qNext').textContent = quiz.n >= TOTAL ? '結果を見る' : '次へ'; $('qNext').style.display = 'inline-block';
-  $('slider').value = s.o; draw(s.o, true);
-  beep(d <= 3 ? [784, 988] : [392], .3, .1);
+  beep(p >= 88 ? [784, 988] : [392], .3, .1);
 }
 function qEnd() {
   quiz.phase = 'end';
   const sc = quiz.score, title = sc >= 400 ? '🏅 名誉駅長' : sc >= 300 ? '🚉 駅長' : sc >= 200 ? '🎫 助役' : '🔰 見習い';
   $('qHead').textContent = 'クイズ終了'; $('qName').textContent = `${sc}点／${TOTAL * 100}点`; $('qLine').textContent = '';
+  $('qChoices').innerHTML = ''; $('qAsk').style.display = 'none';
   $('qRes').innerHTML = `あなたの称号は <b>${title}</b>`;
-  $('qNext').textContent = 'もう一度';
+  $('qNext').textContent = 'ほかのクイズへ';
   if (quiz.ring) { map.removeLayer(quiz.ring); quiz.ring = null; }
 }
 function qQuit() {
-  quiz.on = false; if (quiz.ring) { map.removeLayer(quiz.ring); quiz.ring = null; }
+  quiz.on = false; focus = null; if (quiz.ring) { map.removeLayer(quiz.ring); quiz.ring = null; }
   showCard('panel'); draw(curYear(), false);
 }
-$('quizBtn').onclick = qStart;
-$('qGo').onclick = qAnswer;
-$('qNext').onclick = () => quiz.phase === 'end' ? qStart() : qNext();
+$('quizBtn').onclick = qMenu;
+document.querySelectorAll('#qMenu [data-mode]').forEach(b => { b.onclick = () => qBegin(b.dataset.mode); });
+$('qMenuQuit').onclick = qQuit;
+$('qGo').onclick = () => qAnswer();
+$('qNext').onclick = () => quiz.phase === 'end' ? qMenu() : qNext();
 $('qQuit').onclick = qQuit;
 
 // ---------- 路線ものがたり ----------
@@ -508,7 +586,7 @@ function storyStart(li) {
   const ids = S.filter(s => s.ls.some(t => t[0] === li)).map(s => s.i);
   const ps = P.filter(p => p.l === li);
   if (!ids.length && !ps.length) return;
-  stop(); map.closePopup(); focus = li; story.ids = ids;
+  stop(); map.closePopup(); quiz.on = false; if (quiz.ring) { map.removeLayer(quiz.ring); quiz.ring = null; } focus = li; story.ids = ids;
   const ys = new Set();
   for (const i of ids) { for (const [l, o] of S[i].ls) if (l === li) ys.add(o); if (S[i].c) ys.add(S[i].c); }
   for (const p of ps) { if (p.o) ys.add(p.s); if (p.g && p.e) ys.add(p.e + 1); }
@@ -604,6 +682,120 @@ $('cmpA').oninput = $('cmpB').oninput = drawCompare;
   dv.addEventListener('pointerup', () => { drag = false; });
 })();
 
+// ---------- 版の表示とお知らせ ----------
+const APP_VER = 5;
+const HISTORY = [
+  [5, ['何版かを表示し、版が変わったらお知らせ', 'パネルを好きな場所へ動かせる・たためる（再生中だけ小さくもできる）', '📍「この辺りの鉄道史」：地図の場所を選ぶ（長押し・右クリックでも）と、その辺りに鉄道が来た年と駅の年表', 'クイズが3種類に：「この路線図は何年？」「光っている路線はどれ？」を追加']],
+  [4, ['線路を実際の形に（国土数値情報）', '駅が線路をたどって順に出る', '読み込みが止まる不具合を修正']],
+  [3, ['GitHubで公開', '色分けと絞り込み、路線ものがたり、2つの年を比べる、時代の空中写真、廃線の幽霊、駅カード']],
+  [2, ['汽車が走る、号外、駅さがし、駅の年齢クイズ']],
+  [1, ['最初の版（駅と、駅どうしを結ぶ直線）']]
+];
+document.querySelectorAll('.verTag').forEach(e => { e.textContent = `第${APP_VER}版`; });
+let toastTimer = null;
+function toast(html, ms) {
+  $('toastBody').innerHTML = html; $('toast').style.display = 'block';
+  clearTimeout(toastTimer); if (ms) toastTimer = setTimeout(() => { $('toast').style.display = 'none'; }, ms);
+}
+$('toastX').onclick = () => { $('toast').style.display = 'none'; };
+const histHtml = list => list.map(([v, items]) => `<div><b>第${v}版</b><ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>`).join('');
+$('aboutBtn').onclick = () => toast(`<b>鉄道のひろがり　いまは第${APP_VER}版</b>` + histHtml(HISTORY));
+async function versionNotice() {
+  let seen = 0, used = false;
+  try { seen = +localStorage.getItem('eki_ver') || 0; used = !!localStorage.getItem(PREF); localStorage.setItem('eki_ver', APP_VER); } catch (e) {}
+  if (!seen) {
+    // 版の記録を始める前（第4版まで）から使っている場合
+    let old = used || HAD_SW;
+    try { if (!old && window.caches) old = (await caches.keys()).some(k => k.startsWith('eki') && k !== 'eki-v' + APP_VER); } catch (e) {}
+    if (old) seen = 4;
+  }
+  if (seen && seen < APP_VER) toast(`<b>🆕 第${APP_VER}版になりました</b>` + histHtml(HISTORY.filter(([v]) => v > seen)));
+}
+
+// ---------- パネルを動かす・たたむ ----------
+opt.fold = opt.fold || {};
+function placeCards() {
+  const W = innerWidth, H = innerHeight;
+  document.querySelectorAll('.card').forEach(c => {
+    if (opt.pos) {
+      c.classList.add('moved');
+      const w = c.offsetWidth || Math.min(640, W - 24);
+      c.style.left = clamp(opt.pos.x, 4, Math.max(4, W - w - 4)) + 'px';
+      c.style.top = clamp(opt.pos.y, 4, Math.max(4, H - 48)) + 'px';
+    } else { c.classList.remove('moved'); c.style.left = c.style.top = ''; }
+  });
+}
+function setFold(id, on, save) {
+  $(id).classList.toggle('folded', on);
+  $(id).querySelector('.fold').textContent = on ? '▴' : '▾';
+  if (save) { opt.fold[id] = on; savePref(); }
+}
+document.querySelectorAll('.grip').forEach(g => {
+  const id = g.dataset.card, card = $(id);
+  setFold(id, !!opt.fold[id], false);
+  g.querySelector('.fold').onclick = e => { e.stopPropagation(); setFold(id, !card.classList.contains('folded'), true); };
+  let st = null;
+  g.addEventListener('pointerdown', e => {
+    if (e.target.closest('.fold')) return;
+    st = {x: e.clientX, y: e.clientY, l: card.getBoundingClientRect().left, t: card.getBoundingClientRect().top};
+    g.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  g.addEventListener('pointermove', e => {
+    if (!st) return;
+    opt.pos = {x: st.l + e.clientX - st.x, y: st.t + e.clientY - st.y};
+    placeCards();
+  });
+  g.addEventListener('pointerup', () => { if (st) { st = null; savePref(); } });
+  g.addEventListener('dblclick', () => { opt.pos = null; savePref(); placeCards(); });
+});
+$('posReset').onclick = () => { opt.pos = null; savePref(); placeCards(); };
+addEventListener('resize', placeCards);
+$('o_autofold').checked = !!opt.autofold;
+$('o_autofold').onchange = () => { opt.autofold = $('o_autofold').checked; savePref(); };
+function autoFold(playingNow) {
+  if (!opt.autofold) return;
+  setFold('panel', playingNow ? true : !!opt.fold.panel, false);
+  if (!playingNow) placeCards();
+}
+
+// ---------- この辺りの鉄道史 ----------
+const placeLayer = L.layerGroup().addTo(map);
+let placeMode = false;
+const km = (a, b, c, d) => Math.hypot((d - b) * Math.cos(a * Math.PI / 180) * 111.32, (c - a) * 110.57);
+function setPlaceMode(on) {
+  placeMode = on; $('placeBtn').classList.toggle('on', on);
+  map.getContainer().style.cursor = on ? 'crosshair' : '';
+  if (on) toast('📍 調べたい場所を地図でタップしてください（いつでも、長押し・右クリックでも調べられます）', 5000);
+}
+$('placeBtn').onclick = () => setPlaceMode(!placeMode);
+map.on('click', e => { if (placeMode) { setPlaceMode(false); $('toast').style.display = 'none'; placeInfo(e.latlng); } });
+map.on('contextmenu', e => { if (!cmp.on && !quiz.on) placeInfo(e.latlng); });
+function placeInfo(at) {
+  const R = 2;
+  const near = S.map(s => [s, km(at.lat, at.lng, s.lat, s.lon)]).filter(([, d]) => d <= R);
+  let first = null;
+  for (const p of P) {
+    if (first && p.s >= first.s) continue;
+    for (const q of p.pts) if (km(at.lat, at.lng, q[0], q[1]) < R) { first = p; break; }
+  }
+  const nearest = near.slice().sort((a, b) => a[1] - b[1])[0];
+  const tl = near.slice().sort((a, b) => a[0].o - b[0].o || a[1] - b[1]);
+  let html = `<div class="cardS"><div class="cn">📍 この辺りの鉄道史</div><div class="cl">選んだ場所から半径2km</div>`;
+  if (first) html += `<div>最初に線路が通った年：<b>${first.s}年</b>（${era(first.s)}・${esc(LN[first.l])}）</div>`;
+  else html += `<div>半径2km以内には、線路が通ったことがありません</div>`;
+  if (nearest) html += `<div>いちばん近い駅：${esc(nearest[0].n)}（${nearest[1].toFixed(1)}km、${nearest[0].o}年開業）</div>`;
+  if (tl.length) {
+    html += `<div style="margin-top:4px;font-weight:700">駅の年表（${tl.length}駅）</div>`;
+    html += tl.slice(0, 14).map(([s]) => `<div class="tl"><button data-act="jumpy" data-y="${s.o}">${s.o}</button><span>${esc(s.n)}<span style="color:#6b5a44">（${esc(s.ls.map(([l]) => LN[l]).slice(0, 2).join('・'))}）${s.c ? '　' + s.c + '年に廃止' : ''}</span></span></div>`).join('');
+    if (tl.length > 14) html += `<div class="tl" style="color:#6b5a44">ほか${tl.length - 14}駅</div>`;
+  } else html += `<div>半径2km以内に駅はありません</div>`;
+  html += '</div>';
+  L.popup({maxWidth: 300, maxHeight: 340, ...popPad()}).setLatLng(at).setContent(html).openOn(map);
+  placeLayer.clearLayers();
+  L.circle(at, {radius: R * 1000, color: '#1f4e79', weight: 1.5, dashArray: '5 5', fillOpacity: .05, interactive: false}).addTo(placeLayer);
+}
+map.on('popupclose', () => placeLayer.clearLayers());
+
 // ---------- 起動 ----------
 async function start() {
   $('msg').style.display = 'block';
@@ -613,6 +805,7 @@ async function start() {
     prep();
     $('msg').style.display = 'none';
     draw(curYear(), false);
+    placeCards(); versionNotice();
   } catch (e) {
     $('msg').innerHTML = '読み込みに失敗しました（' + esc(e.message) + '）。<button id="retry">もう一度</button>';
     $('retry').onclick = () => start();
@@ -622,4 +815,17 @@ $('slider').max = Y1;
 try { localStorage.removeItem('eki_data_v3'); localStorage.removeItem('railmap_kanto_v1'); } catch (e) {}
 start();
 
-if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('./sw.js', {scope: './'}).catch(() => {});
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('./sw.js', {scope: './'}).then(reg => {
+    // 新しい版が届いたら知らせる
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing; if (!w) return;
+      w.addEventListener('statechange', () => {
+        // 開いた直後は、すでに新しい版を読み込んでいるので知らせない（開きっぱなしの間に届いたときだけ）
+        if (w.state === 'installed' && navigator.serviceWorker.controller && Date.now() - T0 > 20000)
+          toast('<b>🆕 新しい版が届きました</b><br><button onclick="location.reload()">読み込み直して新しい版にする</button>');
+      });
+    });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  }).catch(() => {});
+}
