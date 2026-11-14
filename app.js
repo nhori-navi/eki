@@ -86,7 +86,7 @@ const curYear = () => +$('slider').value;
 
 // ---------- データ ----------
 async function load() {
-  const r = await fetch('rails.json?v=5');
+  const r = await fetch('rails.json?v=6');
   if (!r.ok) throw new Error('rails.json: HTTP ' + r.status);
   const d = await r.json();
   LN = d.L;
@@ -136,7 +136,7 @@ const trainIcon = y => y < 1925 ? '🚂' : y < 1964 ? '🚃' : '🚄';
 // ポップアップがパネルの下に隠れないように、パネルのある側に余白をとる
 let PP = {};
 function popPad() {
-  const c = ['panel', 'quiz', 'story', 'cmp'].map($).find(e => getComputedStyle(e).display !== 'none');
+  const c = ['panel', 'quiz', 'story', 'cmp', 'ride', 'me'].map($).find(e => getComputedStyle(e).display !== 'none');
   const tl = [20, 20], br = [20, 20];
   if (c) { const r = c.getBoundingClientRect(), H = innerHeight; if (r.top < H / 2) tl[1] = r.bottom + 10; else br[1] = H - r.top + 10; }
   PP = {autoPanPaddingTopLeft: tl, autoPanPaddingBottomRight: br};
@@ -210,11 +210,11 @@ function draw(y, animate) {
   else { newP.forEach(p => line(p, 'new', fx, R0)); order.forEach(i => dot(i, 'new', fx, R0)); }
   labels(y);
   $('year').textContent = y;
-  $('era').textContent = era(y);
+  $('era').textContent = era(y) + ageText(y);
   $('cnt').textContent = '駅数 ' + shown;
   $('news').textContent = order.length ? 'この年の開業：' + order.slice(0, 15).map(i => S[i].n).join('、') + (order.length > 15 ? ` ほか${order.length - 15}駅` : '') : '';
   background(y); spark(y);
-  if (opt.gogai && !quiz.on && EV[y]) gogai(y);
+  if (opt.gogai && !quiz.on && !ride.on && (EV[y] || y === opt.birth)) gogai(y, order.length);
   else if (!animate) $('gogai').classList.remove('show');
   if (animate && opt.follow && order.length && !quiz.on) {
     const c = L.latLngBounds(order.map(ll)).getCenter();
@@ -341,9 +341,10 @@ function beep(freqs, len, vol) {
   }
 }
 let gTimer = null;
-function gogai(y) {
+function gogai(y, nNew) {
   $('gEra').textContent = y + '年（' + era(y) + '）';
-  $('gText').textContent = EV[y];
+  const me = y === opt.birth ? `🎂 あなたが生まれた年！この年に開業した駅：${nNew || 0}駅` : '';
+  $('gText').textContent = [me, EV[y] || ''].filter(Boolean).join('　／　');
   $('gogai').classList.add('show');
   clearTimeout(gTimer);
   gTimer = setTimeout(() => $('gogai').classList.remove('show'), Math.max(2400, +$('speed').value * 4));
@@ -358,6 +359,7 @@ function spark(y) {
   c.lineTo(X(Y1), H - 2); c.closePath(); c.fillStyle = 'rgba(31,78,121,.18)'; c.fill();
   c.beginPath(); for (let v = Y0; v <= Y1; v++) c[v === Y0 ? 'moveTo' : 'lineTo'](X(v), Yp(counts[v] || 0));
   c.strokeStyle = '#1f4e79'; c.lineWidth = 1.2; c.stroke();
+  if (opt.birth >= Y0 && opt.birth <= Y1) { c.beginPath(); c.arc(X(opt.birth), H - 3, 2.5, 0, 7); c.fillStyle = '#ef6c00'; c.fill(); }
   c.beginPath(); c.moveTo(X(y), 0); c.lineTo(X(y), H); c.strokeStyle = '#c62828'; c.lineWidth = 1.5; c.stroke();
 }
 
@@ -379,13 +381,15 @@ function card(i) {
   ${nb.length ? `<div>開業時の隣の駅：${esc(nb.join('・'))}</div>` : ''}
   <div>同じ年に開業：${same.length}駅${same.length ? '（' + esc(same.slice(0, 4).map(x => x.n).join('・')) + (same.length > 4 ? ' など' : '') + '）' : ''}</div>
   <div class="row" style="margin-top:6px"><button data-act="year" data-id="${i}">開業した年へ</button>
-  ${s.ls.slice(0, 3).map(([l]) => `<button data-act="story" data-line="${l}">📖 ${esc(LN[l])}</button>`).join('')}</div></div>`;
+  ${s.ls.slice(0, 3).map(([l]) => `<button data-act="story" data-line="${l}">📖 ${esc(LN[l])}</button>`).join('')}
+  ${s.ls.length ? `<button data-act="ride" data-line="${s.ls[0][0]}">🚂 ${esc(LN[s.ls[0][0]])}に乗る</button>` : ''}</div></div>`;
 }
 map.on('popupopen', e => {
   e.popup.getElement().querySelectorAll('button[data-act]').forEach(b => {
     b.onclick = () => {
       if (b.dataset.act === 'jumpy') jump(+b.dataset.y);
       else if (b.dataset.act === 'year') goStation(+b.dataset.id, false);
+      else if (b.dataset.act === 'ride') { map.closePopup(); if (cmp.on) cmpEnd(); quiz.on = false; rideOpen(+b.dataset.line); }
       else { map.closePopup(); if (cmp.on) cmpEnd(); if (quiz.on) qQuit(); storyStart(+b.dataset.line); }
     };
   });
@@ -451,7 +455,7 @@ $('find').onclick = findStation;
 $('q').onkeydown = e => { if (e.key === 'Enter') findStation(); };
 
 // ---------- パネルの切り替え ----------
-function showCard(name) { for (const c of ['panel', 'quiz', 'story', 'cmp']) $(c).style.display = c === name ? 'block' : 'none'; }
+function showCard(name) { for (const c of ['panel', 'quiz', 'story', 'cmp', 'ride', 'me']) $(c).style.display = c === name ? 'block' : 'none'; }
 
 // ---------- クイズ（3種類） ----------
 const quiz = {on: false, n: 0, score: 0, t: null, ring: null, phase: '', mode: '', ans: null};
@@ -683,8 +687,9 @@ $('cmpA').oninput = $('cmpB').oninput = drawCompare;
 })();
 
 // ---------- 版の表示とお知らせ ----------
-const APP_VER = 5;
+const APP_VER = 6;
 const HISTORY = [
+  [6, ['🚂「乗ってみる」：その時代の列車に乗って、駅名標を見ながら路線を走る（当時の所要時間の目安つき）', '🎂「わたしの年表」：生まれた年を入れると、同い年の駅や、年ごとの自分の年齢が地図に出る']],
   [5, ['何版かを表示し、版が変わったらお知らせ', 'パネルを好きな場所へ動かせる・たためる（再生中だけ小さくもできる）', '📍「この辺りの鉄道史」：地図の場所を選ぶ（長押し・右クリックでも）と、その辺りに鉄道が来た年と駅の年表', 'クイズが3種類に：「この路線図は何年？」「光っている路線はどれ？」を追加']],
   [4, ['線路を実際の形に（国土数値情報）', '駅が線路をたどって順に出る', '読み込みが止まる不具合を修正']],
   [3, ['GitHubで公開', '色分けと絞り込み、路線ものがたり、2つの年を比べる、時代の空中写真、廃線の幽霊、駅カード']],
@@ -795,6 +800,186 @@ function placeInfo(at) {
   L.circle(at, {radius: R * 1000, color: '#1f4e79', weight: 1.5, dashArray: '5 5', fillOpacity: .05, interactive: false}).addTo(placeLayer);
 }
 map.on('popupclose', () => placeLayer.clearLayers());
+
+// ---------- 🚂 乗ってみる ----------
+const rideLayer = L.layerGroup().addTo(map);
+const ride = {on: false, li: null, y: 0, R: null, pos: 0, next: 0, dwell: 0, speed: 1, paused: false, rev: false, mk: null, trail: null, ti: 0, last: 0};
+const KM_PER_SEC = 1.6;  // 画面上の速さ（×1のとき1秒で1.6km）
+// 当時の速さの目安（km/h、停車時間込みのおおよそ）
+const eraKmh = (y, cat) => cat === 'shin' ? (y < 1985 ? 160 : y < 2000 ? 200 : 230) : cat === 'tram' ? 12 : cat === 'sub' ? 30 : y < 1900 ? 33 : y < 1930 ? 36 : y < 1960 ? 42 : 50;
+function plen(pts) { let d = 0; for (let i = 1; i < pts.length; i++) d += km(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]); return d; }
+function buildRoute(li, y, rev) {
+  const ps = P.filter(p => p.l === li && present(p, y));
+  if (!ps.length) return null;
+  const key = (p, end) => { const st = end ? p.b : p.a; if (st >= 0) return 's' + st; const q = end ? p.pts[p.pts.length - 1] : p.pts[0]; return q[0].toFixed(3) + ',' + q[1].toFixed(3); };
+  const adj = new Map();
+  const add = (u, v, p, len) => { if (!adj.has(u)) adj.set(u, []); adj.get(u).push([v, p, len]); };
+  for (const p of ps) { p._u = key(p, 0); p._v = key(p, 1); const len = plen(p.pts); add(p._u, p._v, p, len); add(p._v, p._u, p, len); }
+  const dij = src => {
+    const dist = new Map([[src, 0]]), prev = new Map(), done = new Set(), pq = [[0, src]];
+    while (pq.length) {
+      pq.sort((a, b) => a[0] - b[0]); const [d, u] = pq.shift();
+      if (done.has(u)) continue; done.add(u);
+      for (const [v, p, len] of adj.get(u) || []) { const nd = d + len; if (!dist.has(v) || nd < dist.get(v)) { dist.set(v, nd); prev.set(v, [u, p]); pq.push([nd, v]); } }
+    }
+    return {dist, prev};
+  };
+  const far = r => [...r.dist.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  // いちばん長い道のりを探す（端から端まで）
+  let r = dij(adj.keys().next().value); const A = far(r); r = dij(A); const Bn = far(r);
+  const seq = []; let cur = Bn;
+  while (cur !== A) { const [u, p] = r.prev.get(cur); seq.push([p, u]); cur = u; }
+  seq.reverse();
+  const pts = [], nodes = [];
+  for (const [p, u] of seq) {
+    let q = p._u === u ? p.pts : p.pts.slice().reverse();
+    nodes.push([u, pts.length]);
+    pts.push(...(pts.length ? q.slice(1) : q));
+  }
+  nodes.push([Bn, pts.length - 1]);
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + km(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]));
+  let stops = nodes.filter(([n]) => n[0] === 's' && isOpen(S[+n.slice(1)], y)).map(([n, i]) => ({i: +n.slice(1), km: cum[i]}));
+  stops = stops.filter((s, k) => k === 0 || s.i !== stops[k - 1].i);
+  // 東京駅に近い端から出発する（逆向きも選べる）
+  const T = [35.681, 139.767], dA = km(pts[0][0], pts[0][1], ...T), dB = km(pts[pts.length - 1][0], pts[pts.length - 1][1], ...T);
+  let R = {pts, cum, stops, total: cum[cum.length - 1], cat: ps[0].cat};
+  if ((dA > dB) !== !!rev) {
+    const tot = R.total;
+    R = {pts: pts.slice().reverse(), cum: cum.map(c => tot - c).reverse(), stops: stops.map(s => ({i: s.i, km: tot - s.km})).reverse(), total: tot, cat: R.cat};
+  }
+  return R;
+}
+function pointAt(R, d) {
+  let lo = 0, hi = R.cum.length - 1;
+  while (lo < hi - 1) { const m = (lo + hi) >> 1; if (R.cum[m] <= d) lo = m; else hi = m; }
+  const seg = (R.cum[hi] - R.cum[lo]) || 1e-9, k = clamp((d - R.cum[lo]) / seg, 0, 1);
+  return [[R.pts[lo][0] + (R.pts[hi][0] - R.pts[lo][0]) * k, R.pts[lo][1] + (R.pts[hi][1] - R.pts[lo][1]) * k], lo];
+}
+function rideOpen(li) {
+  stop(); storyAuto(false); map.closePopup(); quiz.on = false; if (quiz.ring) { map.removeLayer(quiz.ring); quiz.ring = null; }
+  showCard('ride'); $('rPick').style.display = 'block'; $('rMain').style.display = 'none';
+  $('rYear').value = curYear(); if (li != null) $('rLine').value = LN[li];
+}
+$('rideBtn').onclick = () => rideOpen(null);
+$('rCancel').onclick = () => { showCard('panel'); };
+$('rGo').onclick = () => {
+  const q = $('rLine').value.trim(); if (!q) return;
+  const li = LN.indexOf(q) >= 0 ? LN.indexOf(q) : lineList.find(k => LN[k].includes(q));
+  if (li == null || li < 0) { $('rLine').value = ''; $('rLine').placeholder = '見つかりませんでした'; return; }
+  let y = clamp(+$('rYear').value || curYear(), Y0, Y1);
+  if (!P.some(p => p.l === li && present(p, y))) {
+    const ys = P.filter(p => p.l === li).map(p => p.s).filter(s => s >= y).sort((a, b) => a - b);
+    const y2 = ys[0] || P.filter(p => p.l === li).map(p => p.s).sort((a, b) => a - b)[0];
+    toast(`${esc(LN[li])}は${y}年にはまだありません。${y2}年に乗ります`, 4000); y = y2;
+  }
+  rideStart(li, y, false);
+};
+$('rLine').onkeydown = e => { if (e.key === 'Enter') $('rGo').onclick(); };
+function rideStart(li, y, rev) {
+  rideStop();
+  const R = buildRoute(li, y, rev);
+  if (!R || R.total < 0.3) { toast('この路線は短すぎて乗れませんでした', 3000); return; }
+  Object.assign(ride, {on: true, li, y, R, pos: 0, next: 0, dwell: 1.2, paused: false, rev, ti: 0});
+  focus = li; $('slider').value = y; draw(y, false);
+  $('rPick').style.display = 'none'; $('rMain').style.display = 'block';
+  $('rTitle').textContent = `🚂 ${LN[li]}（${y}年・${era(y)}）`;
+  $('rPause').textContent = '❚❚';
+  ride.trail = L.polyline([R.pts[0]], {renderer: R0, interactive: false, color: '#ff8f00', weight: 6, opacity: .8}).addTo(rideLayer);
+  ride.mk = L.marker(R.pts[0], {icon: L.divIcon({className: 'train', html: R.cat === 'shin' ? '🚄' : R.cat === 'tram' ? '🚋' : trainIcon(y), iconSize: [22, 22]}), interactive: false, zIndexOffset: 1000}).addTo(rideLayer);
+  map.setView(R.pts[0], 14, {animate: false});
+  if (R.stops.length && R.stops[0].km < 0.05) { arrive(0); ride.next = 1; }
+  board();
+  ride.last = performance.now();
+  requestAnimationFrame(rideStep);
+}
+function rideStop() {
+  ride.on = false;
+  if (ride.mk) rideLayer.removeLayer(ride.mk); if (ride.trail) rideLayer.removeLayer(ride.trail);
+  ride.mk = ride.trail = null;
+}
+function rideMinutes(d) { return Math.round(d / eraKmh(ride.y, ride.R.cat) * 60); }
+const hm = m => m >= 60 ? `${Math.floor(m / 60)}時間${m % 60}分` : `${m}分`;
+function board(arrived) {
+  const R = ride.R, st = R.stops;
+  const curI = arrived != null ? arrived : ride.next - 1;
+  const nextI = arrived != null ? arrived + 1 : ride.next;
+  const name = k => k >= 0 && k < st.length ? S[st[k].i].n.replace(/駅$/, '') : '';
+  const big = arrived != null ? name(arrived) : name(nextI);
+  const lab = arrived != null ? (arrived === st.length - 1 ? '終点' : '') : (nextI < st.length ? (nextI === st.length - 1 ? 'つぎは 終点' : 'つぎは') : '');
+  const s = arrived != null ? S[st[arrived].i] : nextI < st.length ? S[st[nextI].i] : null;
+  $('rBoard').innerHTML = `<div class="bl">${esc(name(curI - (arrived != null ? 1 : 0)) || '　')}</div><div class="bc"><small>${lab || '　'}</small><b>${esc(big || '—')}</b><small>${s ? s.o + '年開業' : '　'}</small></div><div class="br">${esc(name(arrived != null ? arrived + 1 : nextI + 1) || '　')}</div>`;
+  $('rBoard').style.borderTopColor = CATS[R.cat].color;
+}
+function arrive(k) {
+  board(k); ride.dwell = k === ride.R.stops.length - 1 ? 0 : 1.1;
+  beep([880, 659], .35, .06);
+}
+function rideStep(now) {
+  if (!ride.on) return;
+  const R = ride.R, dt = Math.min(.1, (now - ride.last) / 1000); ride.last = now;
+  if (!ride.paused) {
+    if (ride.dwell > 0) { ride.dwell -= dt * ride.speed; if (ride.dwell <= 0) board(); }
+    else {
+      ride.pos += dt * KM_PER_SEC * ride.speed;
+      if (ride.next < R.stops.length && ride.pos >= R.stops[ride.next].km) { ride.pos = R.stops[ride.next].km; arrive(ride.next); ride.next++; }
+    }
+  }
+  const [pt, idx] = pointAt(R, Math.min(ride.pos, R.total));
+  while (ride.ti < idx) { ride.ti++; ride.trail.addLatLng(R.pts[ride.ti]); }
+  const tl = ride.trail.getLatLngs(); if (tl.length > ride.ti + 1) tl.pop();
+  ride.trail.addLatLng(pt);
+  ride.mk.setLatLng(pt); map.setView(pt, map.getZoom(), {animate: false});
+  const m = rideMinutes(ride.pos);
+  $('rInfo').textContent = `${ride.pos.toFixed(1)}km／${R.total.toFixed(1)}km　出発から約${hm(m)}（当時の目安）`;
+  if (ride.pos >= R.total - 1e-6 && ride.dwell <= 0) {
+    $('rInfo').innerHTML = `終点に着きました。${R.total.toFixed(1)}km・${R.stops.length}駅、当時の目安で約<b>${hm(rideMinutes(R.total))}</b>`;
+    ride.on = false; $('rPause').textContent = '↻'; return;
+  }
+  requestAnimationFrame(rideStep);
+}
+$('rPause').onclick = () => {
+  if (!ride.on) return rideStart(ride.li, ride.y, ride.rev);
+  ride.paused = !ride.paused; $('rPause').textContent = ride.paused ? '▶' : '❚❚'; ride.last = performance.now();
+};
+$('rSpeed').onchange = () => { ride.speed = +$('rSpeed').value; };
+$('rRev').onclick = () => rideStart(ride.li, ride.y, !ride.rev);
+$('rQuit').onclick = () => { rideStop(); focus = null; showCard('panel'); map.setZoom(11); draw(curYear(), false); };
+
+// ---------- 🎂 わたしの年表 ----------
+function ageText(y) {
+  const b = opt.birth; if (!b) return '';
+  if (y >= b) return `・あなた${y - b}歳`;
+  return b - y <= 30 ? `・生まれる${b - y}年前` : '';
+}
+$('meBtn').onclick = () => { stop(); map.closePopup(); showCard('me'); if (opt.birth) { $('birth').value = opt.birth; meShow(); } else $('birth').focus(); };
+$('meQuit').onclick = () => showCard('panel');
+$('meGo').onclick = () => {
+  const b = +$('birth').value;
+  if (!b || b < 1872 || b > Y1) { $('meRes').textContent = `${Y0}〜${Y1}の年を入れてください`; return; }
+  opt.birth = b; savePref(); meShow(); draw(curYear(), false);
+};
+$('birth').onkeydown = e => { if (e.key === 'Enter') $('meGo').onclick(); };
+$('meClear').onclick = () => { delete opt.birth; savePref(); $('birth').value = ''; $('meRes').innerHTML = ''; draw(curYear(), false); };
+function meShow() {
+  const b = opt.birth, now = S.filter(s => s.c == null);
+  const same = S.filter(s => s.o === b);
+  const older = now.filter(s => s.o < b).length, younger = now.filter(s => s.o > b).length;
+  const c = map.getCenter();
+  same.sort((x, y) => km(c.lat, c.lng, x.lat, x.lon) - km(c.lat, c.lng, y.lat, y.lon));
+  const at20 = b + 20 <= Y1 ? S.filter(s => s.o === b + 20).length : null;
+  const pct = Math.round(younger / Math.max(1, now.length) * 100);
+  const btn = (y, t) => `<button data-y="${y}" class="meY">${t}</button>`;
+  $('meRes').innerHTML = `
+  <div>🎂 <b>${b}年（${era(b)}）</b>生まれ</div>
+  <div>同い年の駅：<b>${same.length}駅</b>${same.length ? '（' + esc(same.slice(0, 10).map(s => s.n).join('・')) + (same.length > 10 ? ' など' : '') + '）' : ''}</div>
+  <div>いまある駅のうち、あなたより年上の駅 <b>${older}</b>、年下の駅 <b>${younger}</b>（あなたの人生で生まれた駅が${pct}%）</div>
+  <div>首都圏の駅数：生まれた年 <b>${counts[b] || 0}</b> → いま <b>${counts[Y1] || 0}</b></div>
+  ${at20 != null ? `<div>20歳の年（${b + 20}年）に開業した駅：${at20}駅</div>` : ''}
+  <div class="row">${btn(b, '生まれた年の地図')}${b + 20 <= Y1 ? btn(b + 20, '20歳の年') : ''}<button id="mePlay">生まれた年から再生 ▶</button></div>`;
+  $('meRes').querySelectorAll('.meY').forEach(e => { e.onclick = () => { showCard('panel'); jump(+e.dataset.y); }; });
+  $('mePlay').onclick = () => { showCard('panel'); $('slider').value = b - 1; $('play').onclick(); };
+}
 
 // ---------- 起動 ----------
 async function start() {
