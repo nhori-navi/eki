@@ -1,7 +1,7 @@
 // 鉄道のひろがり（/eki/）のサービスワーカー
 // 同じアドレスのほかのアプリとキャッシュ置き場を共有しているので、"eki" で始まるものだけを扱う
-const CACHE = 'eki-v8.1';
-const SHELL = ['./', './index.html', './app.js?v=8.1', './rails.json?v=8.1', './manifest.json', './icon-192.png', './icon-512.png'];
+const CACHE = 'eki-v9';
+const SHELL = ['./', './index.html', './app.js?v=9', './rails.json?v=9', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
@@ -20,7 +20,7 @@ self.addEventListener('fetch', e => {
     e.respondWith(fetch(e.request).then(r => {
       const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r;
     }).catch(() => caches.match(e.request)));
-  } else if (url.hostname === 'cdnjs.cloudflare.com') {
+  } else if (url.hostname === 'cdnjs.cloudflare.com' || url.hostname === 'cdn.jsdelivr.net') {
     // 地図ライブラリは「まず保存分」
     e.respondWith(caches.match(e.request).then(m => m || fetch(e.request).then(r => {
       const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r;

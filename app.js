@@ -89,7 +89,7 @@ const curYear = () => +$('slider').value;
 
 // ---------- データ ----------
 async function load() {
-  const r = await fetch('rails.json?v=8.1');
+  const r = await fetch('rails.json?v=9');
   if (!r.ok) throw new Error('rails.json: HTTP ' + r.status);
   const d = await r.json();
   LN = d.L;
@@ -721,8 +721,9 @@ $('cmpA').oninput = $('cmpB').oninput = drawCompare;
 })();
 
 // ---------- 版の表示とお知らせ ----------
-const APP_VER = 8.1;
+const APP_VER = 9;
 const HISTORY = [
+  [9, ['🎥 乗ってみるに「3D（前面展望）」：列車の少し上から前を見る立体の眺め。地形の起伏つき、地面はその時代の空中写真か地図、駅名標が立つ', '3Dでは実際の速さの8倍で走る（×0.5〜×4で調整）。カメラの「高さ」も選べる']],
   [8.1, ['不具合の修正：1945〜1969年の空中写真が表示されなかったのを直しました']],
   [8, ['🚂 乗ってみるに「眺め」：前を見る（進む方向が上）・横の窓・北が上を選べる', '乗車中は、その時代の空中写真の上を走る（1945年より前はセピア色の地図）', '👻 廃線探検：廃止された区間を光らせ、一覧から選ぶと場所と年代、最後の年に乗ることも', '🌙 夜の地図：背景を暗くして線路が光って見える']],
   [7, ['パネルを1段にまとめ、道具は「≡ メニュー」へ。ボタンを大きく、駅の点も押しやすく', '色の凡例をいつも表示。廃線は灰色の点線に', '⭐ 見どころ再生（静かな年は早送り）と、再生する期間の指定', '🚂 乗ってみるが本格的に：切符と改札、発車の音（汽笛・発車ベル・発車メロディ）、ガタンゴトン、加速と減速、揺れ、速度計と時計、車内の文字案内', '🔗 この画面を共有（年・場所・路線をリンクで送れる）', '初めての人向けの使い方案内、パソコンのキー操作（スペース：再生、←→：1年、Shift＋←→：10年、M：メニュー）']],
@@ -1055,10 +1056,12 @@ function rideStart(li, y, rev, R0route) {
   led(`この列車は ${ride.dest}ゆきです　まもなく発車します`);
   rumbleStart(); departSound(true);
   ride.last = performance.now();
+  $('rCamWrap').style.display = $('rView').value === '3d' ? '' : 'none';
+  if ($('rView').value === '3d') enter3D(); else if (ride.is3d) exit3D();
   requestAnimationFrame(rideStep);
 }
 function rideStop() {
-  ride.on = false; rumbleStop();
+  ride.on = false; rumbleStop(); if (ride.is3d) exit3D();
   if (ride.mk) rideLayer.removeLayer(ride.mk); if (ride.trail) rideLayer.removeLayer(ride.trail);
   ride.mk = ride.trail = null;
   $('map').style.transform = '';
@@ -1098,7 +1101,7 @@ function headingAt(R, d) {
 }
 const angDiff = (a, b) => ((a - b + 540) % 360) - 180;
 // 地図は「向き」の分だけ時計回りに回るので、進む向きを上（前）・右（横の窓）にするには逆に回す
-const targetBearing = (R, d) => $('rView').value === 'side' ? 90 - headingAt(R, d) : -headingAt(R, d);
+const targetBearing = (R, d) => $('rView').value === 'side' ? 90 - headingAt(R, d) : -headingAt(R, d);  // 「3D」が使えないときは「前を見る」と同じ
 function followTrain(pt) {
   const W = map.getSize().x, H = map.getSize().y, r = $('ride').getBoundingClientRect();
   const bottomCard = (r.top + r.bottom) / 2 > H / 2;
@@ -1122,7 +1125,8 @@ function rideStep(now) {
       const ds = ride.pos - ride.lastStop, dn = nextKm - ride.pos;
       const acc = R.cat === 'shin' ? 3 : R.cat === 'tram' ? .15 : .8;
       f = Math.min(clamp(Math.sqrt(Math.max(ds, 0) / acc), .1, 1), clamp(Math.sqrt(Math.max(dn, 0) / acc), .07, 1));
-      const move = dt * KM_PER_SEC * ride.speed * f * (R.cat === 'shin' ? 2.2 : 1);
+      // 3Dのときは実際の速さの8倍、地図のときは画面に合わせた速さ
+      const move = ride.is3d ? dt * (ride.top * f / 3600) * 8 * ride.speed : dt * KM_PER_SEC * ride.speed * f * (R.cat === 'shin' ? 2.2 : 1);
       ride.pos += move;
       ride.sim += move / (ride.top * Math.max(f, .25)) * 60;
       if (dn < acc * .5 && !ride.squealed) { ride.squealed = true; squeal(); const nx = R.stops[ride.next]; if (nx) led(`まもなく ${stName(S[nx.i])}です`); }
@@ -1138,17 +1142,18 @@ function rideStep(now) {
   while (ride.ti < idx) { ride.ti++; ride.trail.addLatLng(R.pts[ride.ti]); }
   const tl = ride.trail.getLatLngs(); if (tl.length > ride.ti + 1) tl.pop();
   ride.trail.addLatLng(pt);
-  if (map.setBearing && $('rView').value !== 'north') {
+  if (ride.is3d) camera3D(dt);
+  else if (map.setBearing && $('rView').value !== 'north') {
     const tb = targetBearing(R, ride.pos);
     ride.bear += angDiff(tb, ride.bear) * Math.min(1, dt * 2.5);
     map.setBearing(ride.bear);
   }
-  ride.mk.setLatLng(pt); followTrain(pt);
+  ride.mk.setLatLng(pt); if (!ride.is3d) followTrain(pt);
   // 揺れ
   if (opt.shake && !REDUCED && !ride.paused) {
     const tx = Math.sin(now / 430) * 1.4 * f + (Math.random() - .5) * 3 * ride.bump, ty = Math.sin(now / 270) * .8 * f + 1.6 * ride.bump;
-    ride.bump *= .82; $('map').style.transform = `translate(${tx.toFixed(1)}px,${ty.toFixed(1)}px)`;
-  } else $('map').style.transform = '';
+    ride.bump *= .82; $(ride.is3d ? 'map3d' : 'map').style.transform = `translate(${tx.toFixed(1)}px,${ty.toFixed(1)}px)`;
+  } else $(ride.is3d ? 'map3d' : 'map').style.transform = '';
   meter(ride.top * f);
   $('rInfo').textContent = `${ride.pos.toFixed(1)}km／${R.total.toFixed(1)}km　出発から約${hm(ride.sim)}（当時の目安）`;
   if (ride.pos >= R.total - 1e-6 && ride.dwell <= 0) {
@@ -1164,8 +1169,12 @@ $('rPause').onclick = () => {
 };
 $('rSpeed').onchange = () => { ride.speed = +$('rSpeed').value; };
 $('rRev').onclick = () => { if ($('rSound').checked) ac(); rideStart(ride.li, ride.y, !ride.rev); };
-$('rView').onchange = () => { if (!map.setBearing) return; if ($('rView').value === 'north') map.setBearing(0); else if (ride.R) { ride.bear = targetBearing(ride.R, ride.pos); map.setBearing(ride.bear); } };
-$('rScene').onchange = () => { if (RIDING) background(ride.y); };
+$('rView').onchange = () => {
+  $('rCamWrap').style.display = $('rView').value === '3d' ? '' : 'none';
+  if ($('rView').value === '3d') { if (ride.on && !ride.is3d) enter3D(); return; }
+  if (ride.is3d) exit3D();
+  if (!map.setBearing) return; if ($('rView').value === 'north') map.setBearing(0); else if (ride.R) { ride.bear = targetBearing(ride.R, ride.pos); map.setBearing(ride.bear); } };
+$('rScene').onchange = () => { if (RIDING) background(ride.y); if (ride.is3d) set3DScene(ride.y); };
 $('rSound').onchange = () => { if ($('rSound').checked) { ac(); if (ride.on && !ride.rumble) rumbleStart(); } else rumbleStop(); };
 $('rQuit').onclick = () => { $('ride').querySelector('.gl').textContent = '⠿ 🚂 乗ってみる'; rideStop(); focus = null; showCard('panel'); map.setZoom(11, {animate: false}); draw(curYear(), false); };
 
@@ -1233,6 +1242,145 @@ function drawHaisen() {
 $('haisenBtn').onclick = haisenOpen;
 $('hSort').onchange = $('hAll').onchange = haisenList;
 $('hQuit').onclick = () => { haisen.on = false; showCard('panel'); draw(curYear(), false); };
+
+// ---------- 🎥 3Dの前面展望（MapLibre を乗車中だけ読み込む） ----------
+const ML_VER = '4.7.1';
+let M3 = null, m3Loaded = false, mlLoading = null, signs = [], signKey = '';
+function loadML() {
+  if (window.maplibregl) return Promise.resolve();
+  if (mlLoading) return mlLoading;
+  mlLoading = new Promise((res, rej) => {
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = `https://cdn.jsdelivr.net/npm/maplibre-gl@${ML_VER}/dist/maplibre-gl.css`; document.head.appendChild(css);
+    const s = document.createElement('script'); s.src = `https://cdn.jsdelivr.net/npm/maplibre-gl@${ML_VER}/dist/maplibre-gl.js`;
+    s.onload = () => res(); s.onerror = () => { mlLoading = null; rej(new Error('3D表示の部品を読み込めませんでした')); };
+    document.head.appendChild(s);
+  });
+  return mlLoading;
+}
+function webglOK() { try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')); } catch (e) { return false; } }
+// 国土地理院の標高タイル（独自の形式）を、MapLibre が読める形式（terrarium）に変換する
+let flatDem = null;
+async function pngOf(canvas) { if (canvas.convertToBlob) return (await canvas.convertToBlob({type: 'image/png'})).arrayBuffer(); return new Promise(r => canvas.toBlob(b => b.arrayBuffer().then(r), 'image/png')); }
+function newCanvas() { if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(256, 256); const c = document.createElement('canvas'); c.width = c.height = 256; return c; }
+async function flatTile() {
+  if (flatDem) return flatDem.slice(0);
+  const c = newCanvas(), x = c.getContext('2d'); x.fillStyle = 'rgb(128,0,0)'; x.fillRect(0, 0, 256, 256);  // 標高0m
+  flatDem = await pngOf(c); return flatDem.slice(0);
+}
+function registerDem() {
+  maplibregl.addProtocol('gsidem', async (params, ac) => {
+    try {
+      const r = await fetch(params.url.replace('gsidem://', 'https://'), {signal: ac.signal});
+      if (!r.ok) return {data: await flatTile()};
+      const bmp = await createImageBitmap(await r.blob());
+      const c = newCanvas(), x = c.getContext('2d'); x.drawImage(bmp, 0, 0);
+      const im = x.getImageData(0, 0, 256, 256), d = im.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const v = d[i] * 65536 + d[i + 1] * 256 + d[i + 2];
+        const hgt = v < 8388608 ? v * .01 : v === 8388608 ? 0 : (v - 16777216) * .01, t = hgt + 32768;
+        d[i] = Math.floor(t / 256); d[i + 1] = Math.floor(t) % 256; d[i + 2] = Math.floor((t % 1) * 256); d[i + 3] = 255;
+      }
+      x.putImageData(im, 0, 0);
+      return {data: await pngOf(c)};
+    } catch (e) { if (e.name === 'AbortError') throw e; return {data: await flatTile()}; }
+  });
+}
+function create3D(center) {
+  registerDem();
+  M3 = new maplibregl.Map({
+    container: 'map3d', interactive: false, maxPitch: 85, attributionControl: {compact: true},
+    center: [center[1], center[0]], zoom: 17, pitch: 78, bearing: 0, fadeDuration: 0,
+    style: {
+      version: 8,
+      sources: {
+        pale: {type: 'raster', tiles: ['https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 18, attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>'},
+        dem: {type: 'raster-dem', tiles: ['gsidem://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 14, encoding: 'terrarium'},
+        others: {type: 'geojson', data: {type: 'FeatureCollection', features: []}},
+        route: {type: 'geojson', data: {type: 'FeatureCollection', features: []}}
+      },
+      layers: [
+        {id: 'pale', type: 'raster', source: 'pale'},
+        {id: 'others', type: 'line', source: 'others', paint: {'line-color': ['get', 'c'], 'line-opacity': .7, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 18, 6]}},
+        {id: 'route-casing', type: 'line', source: 'route', layout: {'line-cap': 'round', 'line-join': 'round'}, paint: {'line-color': '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 18, 20]}},
+        {id: 'route', type: 'line', source: 'route', layout: {'line-cap': 'round', 'line-join': 'round'}, paint: {'line-color': ['get', 'c'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 18, 12]}}
+      ],
+      sky: {'sky-color': '#7fb8e6', 'horizon-color': '#e6eff7', 'fog-color': '#e6eff7', 'sky-horizon-blend': .6, 'horizon-fog-blend': .7, 'fog-ground-blend': .35, 'atmosphere-blend': .6}
+    }
+  });
+  M3.on('load', () => { m3Loaded = true; });
+  M3.on('error', e => { if (e && e.error && !/tile|Tile|fetch|404|Failed/.test(String(e.error.message))) console.warn('3D:', e.error.message); });
+}
+function set3DScene(y) {
+  if (!M3 || !m3Loaded) return;
+  if (M3.getLayer('photo')) M3.removeLayer('photo');
+  if (M3.getSource('photo')) M3.removeSource('photo');
+  const ph = $('rScene').value === 'auto' ? PHOTOS.find(p => y >= p[0] && y <= p[1]) : null;
+  if (ph) {
+    M3.addSource('photo', {type: 'raster', tiles: [`https://cyberjapandata.gsi.go.jp/xyz/${ph[2]}/{z}/{x}/{y}.${ph[4]}`], tileSize: 256, minzoom: ph[2] === 'seamlessphoto' ? 2 : 10, maxzoom: ph[2] === 'seamlessphoto' ? 18 : 17});
+    M3.addLayer({id: 'photo', type: 'raster', source: 'photo'}, 'others');
+  }
+  // 1945年より前はセピア色の地図
+  const old = y < 1945 && !ph, t = clamp((1970 - y) / 90, 0, 1);
+  M3.setPaintProperty('pale', 'raster-saturation', old ? -.75 : -.1);
+  M3.setPaintProperty('pale', 'raster-hue-rotate', old ? 25 * t : 0);
+  M3.setPaintProperty('pale', 'raster-contrast', old ? -.1 : 0);
+}
+function set3DData() {
+  if (!M3 || !m3Loaded) return;
+  const R = ride.R, y = ride.y, others = [];
+  for (const p of P) if (p.l !== ride.li && present(p, y) && opt.cats[p.cat]) others.push({type: 'Feature', properties: {c: CATS[p.cat].color}, geometry: {type: 'LineString', coordinates: p.pts.map(q => [q[1], q[0]])}});
+  M3.getSource('others').setData({type: 'FeatureCollection', features: others});
+  M3.getSource('route').setData({type: 'FeatureCollection', features: [{type: 'Feature', properties: {c: CATS[R.cat].color}, geometry: {type: 'LineString', coordinates: R.pts.map(q => [q[1], q[0]])}}]});
+  set3DScene(y);
+  signKey = ''; update3DSigns();
+}
+// 駅名標：いまの駅と、これから先の3駅だけを立てる
+function update3DSigns() {
+  const R = ride.R, from = Math.max(0, ride.next - 1), to = Math.min(R.stops.length, ride.next + 3), key = from + '-' + to;
+  if (key === signKey) return;
+  signKey = key; signs.forEach(m => m.remove()); signs = [];
+  for (let k = from; k < to; k++) {
+    const s = S[R.stops[k].i], el = document.createElement('div');
+    el.className = 'sign3d'; el.style.borderTopColor = CATS[R.cat].color;
+    el.innerHTML = `${esc(stName(s))}<small>${s.o}年開業</small>`;
+    signs.push(new maplibregl.Marker({element: el, anchor: 'bottom'}).setLngLat([s.lon, s.lat]).addTo(M3));
+  }
+}
+const CAM = {low: [82, 18.2], mid: [79, 17.4], high: [72, 16.3]};
+function camera3D(dt) {
+  if (!M3) return;
+  const R = ride.R, [pitch, zoom0] = CAM[$('rCam').value] || CAM.mid, zoom = zoom0 - (R.cat === 'shin' ? .6 : 0);
+  const card = $('ride').getBoundingClientRect(), H = M3.getContainer().clientHeight;
+  const padB = (card.top + card.bottom) / 2 > H / 2 ? Math.max(0, H - card.top) : 0, padT = padB ? 0 : Math.max(0, card.bottom);
+  const visH = Math.max(120, H - padB - padT), lat = pointAt(R, ride.pos)[0][0];
+  const mpp = 40075016.7 * Math.cos(lat * Math.PI / 180) / (512 * Math.pow(2, zoom));
+  const look = 1.5 * visH * mpp * Math.sin(pitch * Math.PI / 180) / 1000;  // カメラが列車の真上あたりに来るよう、見る点を前に置く
+  const target = headingAt(R, ride.pos);
+  ride.bear3 = ride.bear3 == null ? target : ride.bear3 + angDiff(target, ride.bear3) * Math.min(1, dt * 2);
+  const c = pointAt(R, Math.min(R.total, ride.pos + look))[0];
+  M3.jumpTo({center: [c[1], c[0]], bearing: ride.bear3, pitch, zoom, padding: {top: padT, bottom: padB, left: 0, right: 0}});
+  update3DSigns();
+}
+async function enter3D() {
+  if (!webglOK()) { toast('この端末では3D表示が使えないため、「前を見る」にしました', 4000); $('rView').value = 'front'; return false; }
+  toast('🎥 3Dの景色を準備しています…', 2500);
+  try { await loadML(); } catch (e) { toast(e.message + '。「前を見る」にしました', 4000); $('rView').value = 'front'; return false; }
+  if (!ride.R) return false;
+  if (!M3) create3D(ride.R.pts[0]);
+  document.body.classList.add('is3d'); $('map3d').style.display = 'block'; M3.resize();
+  ride.is3d = true; ride.bear3 = null;
+  const go = () => { m3Loaded = true; setTerrain3D(); set3DData(); camera3D(1); };
+  if (m3Loaded) go(); else M3.once('load', go);
+  return true;
+}
+function exit3D() {
+  ride.is3d = false; document.body.classList.remove('is3d'); $('map3d').style.display = 'none'; $('map3d').style.transform = '';
+  signs.forEach(m => m.remove()); signs = []; signKey = '';
+}
+$('rCam').onchange = () => { if (ride.is3d) camera3D(1); };
+// 地形の起伏（山あいの路線向け。トンネルの多い区間で見えにくいときは切れる）
+function setTerrain3D() { if (M3 && m3Loaded) M3.setTerrain($('rTerrain').checked ? {source: 'dem', exaggeration: 1} : null); }
+$('rTerrain').onchange = setTerrain3D;
 
 // ---------- 使い方の案内 ----------
 const GUIDE = [
