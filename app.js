@@ -1,20 +1,21 @@
 'use strict';
 // 鉄道のひろがり — 新橋開業から現在まで、首都圏の鉄道の広がりを地図で見る
+// 線路と駅：国土数値情報（鉄道時系列）を加工した rails.json
 const Y0 = 1872, Y1 = new Date().getFullYear();
-const KEY = 'eki_data_v3', PREF = 'eki_pref_v1';
+const PREF = 'eki_pref_v1';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-// 事業者の種類と色
+// 事業者の種類と色（rails.json の番号の順）
+const ORDER = ['shin', 'sub', 'tram', 'jr', 'pvt'];
 const CATS = {
   shin: {name: '新幹線', color: '#d84315'},
   jr: {name: 'JR・国鉄', color: '#2e8b57'},
-  pvt: {name: '私鉄', color: '#2f6db5'},
+  pvt: {name: '私鉄など', color: '#2f6db5'},
   sub: {name: '地下鉄', color: '#8e44ad'},
   tram: {name: '路面電車', color: '#a0522d'}
 };
-const ORDER = ['shin', 'sub', 'tram', 'jr', 'pvt'];
 
 // 年表（号外で知らせる出来事）
 const EV = {
@@ -63,11 +64,11 @@ try { Object.assign(opt, JSON.parse(localStorage.getItem(PREF) || '{}'), {sound:
 const savePref = () => { try { localStorage.setItem(PREF, JSON.stringify(opt)); } catch (e) {} };
 
 // ---------- 地図 ----------
-const map = L.map('map', {preferCanvas: true, zoomControl: false}).setView([35.62, 139.62], 10);
+const map = L.map('map', {preferCanvas: true, zoomControl: false}).setView([35.52, 139.66], 10);
 L.control.zoom({position: 'topright'}).addTo(map);
 const pale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
   maxZoom: 18,
-  attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>｜駅データ：<a href="https://www.wikidata.org/" target="_blank">Wikidata</a>'
+  attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>｜<a href="https://nlftp.mlit.go.jp/ksj/" target="_blank">国土数値情報</a>（国交省）を加工'
 }).addTo(map);
 let photo = null, photoId = '';
 const R0 = L.canvas({padding: 0.3});
@@ -77,128 +78,46 @@ map.getPane('cmpL').style.zIndex = 450; map.getPane('cmpR').style.zIndex = 450;
 const RL = L.canvas({pane: 'cmpL'}), RR = L.canvas({pane: 'cmpR'});
 const gL = L.layerGroup().addTo(map), gR = L.layerGroup().addTo(map);
 
-let S = {}, EI = new Map(), counts = {}, lineList = [], gen = 0, lastNew = 0, focus = null;
+let LN = [], S = [], P = [], counts = {}, lineList = [], gen = 0, lastNew = 0, lastOrder = [], focus = null;
 const curYear = () => +$('slider').value;
 
-// ---------- データ取得（Wikidata） ----------
-const BOX = `SERVICE wikibase:box { ?s wdt:P625 ?c .
-  bd:serviceParam wikibase:cornerSouthWest "Point(138.6 34.85)"^^geo:wktLiteral ;
-                  wikibase:cornerNorthEast "Point(140.95 36.3)"^^geo:wktLiteral . }`;
-const Q1 = `SELECT ?s ?sLabel ?c ?open ?close
- (GROUP_CONCAT(DISTINCT STR(?adj); separator=" ") AS ?adjs)
- (GROUP_CONCAT(DISTINCT ?lineL; separator="・") AS ?lines) WHERE {
- ${BOX}
- ?s wdt:P1619 ?open .
- { ?s wdt:P31/wdt:P279* wd:Q55488 } UNION { ?s wdt:P31/wdt:P279* wd:Q2175765 }
- OPTIONAL { ?s wdt:P3999 ?close }
- OPTIONAL { ?s wdt:P197 ?adj }
- OPTIONAL { ?s wdt:P81 ?line . ?line rdfs:label ?lineL . FILTER(LANG(?lineL) = "ja") }
- ?s rdfs:label ?sLabel . FILTER(LANG(?sLabel) = "ja")
-} GROUP BY ?s ?sLabel ?c ?open ?close`;
-const Q2 = `SELECT ?s (GROUP_CONCAT(DISTINCT STR(?t); separator=" ") AS ?ts)
- (GROUP_CONCAT(DISTINCT ?opL; separator="・") AS ?ops) WHERE {
- ${BOX}
- ?s wdt:P1619 ?open .
- { ?s wdt:P31/wdt:P279* wd:Q55488 } UNION { ?s wdt:P31/wdt:P279* wd:Q2175765 }
- OPTIONAL { ?s wdt:P31 ?t }
- OPTIONAL { ?s wdt:P137 ?op . ?op rdfs:label ?opL . FILTER(LANG(?opL) = "ja") }
-} GROUP BY ?s`;
-
-async function sparql(q) {
-  const r = await fetch('https://query.wikidata.org/sparql?format=json&query=' + encodeURIComponent(q), {headers: {Accept: 'application/sparql-results+json'}});
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return (await r.json()).results.bindings;
+// ---------- データ ----------
+async function load() {
+  const r = await fetch('rails.json');
+  if (!r.ok) throw new Error('rails.json: HTTP ' + r.status);
+  const d = await r.json();
+  LN = d.L;
+  S = d.S.map(([n, lat, lon, k, o, c, ls]) => ({n, lat, lon, k: [...k].map(i => ORDER[+i]), o, c: c || null, ls}));
+  P = d.P.map(([k, s, e, f, l, a, b, enc]) => {
+    const pts = []; let la = 0, lo = 0;
+    for (let i = 0; i < enc.length; i += 2) { la += enc[i]; lo += enc[i + 1]; pts.push([la / 1e5, lo / 1e5]); }
+    return {cat: ORDER[k], s, e: e || null, o: !!(f & 1), g: !!(f & 2), l, a, b, pts};
+  });
 }
 
-const JR_RE = /旅客鉄道|ＪＲ|JR|日本国有鉄道|国鉄|鉄道省|鉄道院/;
-const JR_LINES = /本線|山手線|京浜東北線|横須賀線|総武|常磐線|武蔵野線|南武線|横浜線|青梅線|五日市線|八高線|相模線|京葉線|埼京線|川越線|鶴見線|根岸線|内房線|外房線|成田線|鹿島線|東金線|久留里線|日光線|両毛線|水戸線|烏山線|吾妻線|上越線|御殿場線|伊東線|身延線/;
-function classify(l, t, p) {
-  const k = [];
-  if (/新幹線/.test(l)) k.push('shin');
-  if (/Q928830\b/.test(t) || /地下鉄|東京メトロ|帝都高速度交通営団/.test(p) || /メトロ|地下鉄|浅草線|三田線|大江戸線|都営新宿線/.test(l)) k.push('sub');
-  if (/Q2175765\b/.test(t) || /荒川線|都電|世田谷線|路面|軌道線/.test(l)) k.push('tram');
-  if (JR_RE.test(p) || (!p && JR_LINES.test(l))) k.push('jr');
-  if (!k.length || (p && !/旅客鉄道|ＪＲ|JR|日本国有鉄道|国鉄|鉄道省|鉄道院|地下鉄|東京メトロ|帝都高速度交通営団|交通局/.test(p))) k.push('pvt');
-  return [...new Set(k)];
-}
-
-async function load(useCache) {
-  try { localStorage.removeItem('railmap_kanto_v1'); } catch (e) {}
-  if (useCache) { try { const c = localStorage.getItem(KEY); if (c) return JSON.parse(c); } catch (e) {} }
-  const [b1, b2] = await Promise.all([sparql(Q1), sparql(Q2).catch(() => [])]);
-  const out = {}, ex = {};
-  for (const b of b1) {
-    const id = b.s.value.split('/').pop();
-    const m = b.c.value.match(/Point\(([-\d.]+) ([-\d.]+)\)/);
-    const op = parseInt(b.open.value.slice(0, 4), 10);
-    const od = b.open.value.slice(0, 10);
-    let cl = b.close ? parseInt(b.close.value.slice(0, 4), 10) : null;
-    if (!m || isNaN(op)) continue;
-    if (isNaN(cl)) cl = null;
-    const adj = (b.adjs ? b.adjs.value : '').split(' ').filter(Boolean).map(u => u.split('/').pop());
-    const o = out[id];
-    if (!o) out[id] = {n: b.sLabel.value, lat: +m[2], lon: +m[1], o: op, od, c: cl, a: adj, l: b.lines ? b.lines.value : ''};
-    else { if (op < o.o) { o.o = op; o.od = od; } if (cl && (!o.c || cl > o.c)) o.c = cl; }
-  }
-  for (const b of b2) ex[b.s.value.split('/').pop()] = {t: b.ts ? b.ts.value : '', p: b.ops ? b.ops.value : ''};
-  for (const id in out) { const e = ex[id] || {t: '', p: ''}; out[id].k = classify(out[id].l, e.t, e.p); out[id].op = e.p; }
-  try { localStorage.setItem(KEY, JSON.stringify(out)); } catch (e) {}
-  return out;
-}
-
-// ---------- 下ごしらえ ----------
 const isOpen = (s, y) => s.o <= y && (s.c == null || s.c > y);
-const closedBy = (s, y) => s.c != null && s.c <= y;
-const lines = s => s.l ? s.l.split('・') : [];
-const onLine = s => !focus || lines(s).includes(focus);
+const present = (p, y) => p.s <= y && (p.e == null || y <= p.e);
+const isNewP = (p, y) => p.s === y && p.o;
+const ghostAt = (p, y) => p.g && p.e != null && p.e < y;
+const onLineS = s => focus == null || s.ls.some(t => t[0] === focus);
+const onLineP = p => focus == null || p.l === focus;
 const stOn = s => s.k.some(c => opt.cats[c]);
+const ll = i => [S[i].lat, S[i].lon];
 
-function reach(id, y) { // まだ開業していない駅を飛ばして、その年に開いている隣の駅を探す
-  const res = [], seen = new Set([id]), q = S[id].a.map(x => [x, 0]);
-  while (q.length) {
-    const [x, d] = q.shift();
-    if (seen.has(x)) continue; seen.add(x);
-    if (isOpen(S[x], y)) res.push(x);
-    else if (d < 8 && S[x].o > y) for (const z of S[x].a) if (!seen.has(z)) q.push([z, d + 1]);
-  }
-  return res;
-}
-function edgeCat(p, q) {
-  const a = S[p].k, b = S[q].k;
-  for (const c of ORDER) if (a.includes(c) && b.includes(c)) return c;
-  for (const c of ORDER) if (a.includes(c) || b.includes(c)) return c;
-  return 'pvt';
-}
 function prep() {
-  for (const id in S) { S[id].a = S[id].a.filter(x => S[x] && x !== id); if (!S[id].k) S[id].k = ['pvt']; }
-  for (const id in S) for (const x of S[id].a) if (!S[x].a.includes(id)) S[x].a.push(id);
-  EI = new Map(); counts = {};
-  for (let y = Y0; y <= Y1; y++) {
-    let n = 0; const seen = new Set();
-    for (const id in S) {
-      if (!isOpen(S[id], y)) continue;
-      n++;
-      for (const t of reach(id, y)) {
-        const k = id < t ? id + '|' + t : t + '|' + id;
-        if (seen.has(k)) continue; seen.add(k);
-        let r = EI.get(k);
-        if (!r) { r = {p: id < t ? id : t, q: id < t ? t : id, iv: []}; r.cat = edgeCat(r.p, r.q); EI.set(k, r); }
-        const last = r.iv[r.iv.length - 1];
-        if (last && last[1] === y - 1) last[1] = y; else r.iv.push([y, y]);
-      }
-    }
-    counts[y] = n;
-  }
-  const names = [...new Set(Object.values(S).map(s => s.n))].sort();
+  counts = {};
+  for (let y = Y0; y <= Y1; y++) { let n = 0; for (const s of S) if (isOpen(s, y)) n++; counts[y] = n; }
+  S.forEach((s, i) => { s.i = i; });
+  const names = [...new Set(S.map(s => s.n))].sort();
   $('names').innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
-  const lc = {};
-  for (const s of Object.values(S)) for (const l of lines(s)) lc[l] = (lc[l] || 0) + 1;
-  lineList = Object.keys(lc).filter(l => lc[l] >= 3).sort((a, b) => lc[b] - lc[a]);
-  $('lineNames').innerHTML = lineList.map(n => `<option value="${esc(n)}">`).join('');
+  const lc = new Array(LN.length).fill(0);
+  for (const s of S) for (const [l] of s.ls) lc[l]++;
+  lineList = LN.map((n, i) => i).filter(i => lc[i] >= 3).sort((a, b) => lc[b] - lc[a]);
+  $('lineNames').innerHTML = lineList.map(i => `<option value="${esc(LN[i])}">`).join('');
+  // 駅ごとにつながる区間
+  S.forEach(s => { s.p = []; });
+  P.forEach((p, j) => { if (p.a >= 0) S[p.a].p.push(j); if (p.b >= 0) S[p.b].p.push(j); });
 }
-const present = (r, y) => r.iv.some(v => v[0] <= y && y <= v[1]);
-const isNewEdge = (r, y) => present(r, y) && !present(r, y - 1);
-const ghostAt = (r, y) => !present(r, y) && r.iv[0][0] <= y && (closedBy(S[r.p], y) || closedBy(S[r.q], y));
 
 function era(y) {
   const f = (name, n) => name + (n === 1 ? '元' : n) + '年';
@@ -208,50 +127,45 @@ function era(y) {
   if (y >= 1912) return f('大正', y - 1911);
   return f('明治', y - 1867);
 }
-function fmtDate(od) {
-  const [y, m, d] = od.split('-').map(Number);
-  return (m === 1 && d === 1) || !m ? `${y}年` : `${y}年${m}月${d}日`;
-}
 const trainIcon = y => y < 1925 ? '🚂' : y < 1964 ? '🚃' : '🚄';
-const ll = id => [S[id].lat, S[id].lon];
 
 // ---------- 描きかた ----------
-function line(r, style, G, R) {
-  const col = CATS[r.cat].color, ph = opt.bg === 'photo', pts = [ll(r.p), ll(r.q)];
-  const base = {renderer: R, interactive: false};
+function line(p, style, G, R, pts) {
+  const col = CATS[p.cat].color, ph = opt.bg === 'photo';
+  const base = {renderer: R, interactive: false, smoothFactor: 1.2};
+  pts = pts || p.pts;
   if (style === 'new') {
     L.polyline(pts, {...base, color: '#ffd54f', weight: 9, opacity: .65}).addTo(G);
     return L.polyline(pts, {...base, color: col, weight: 3.5, opacity: 1}).addTo(G);
   }
   const st = {
     full: {color: col, weight: 2.5, opacity: ph ? .95 : .85},
-    base: {color: col, weight: 2, opacity: ph ? .75 : .38},
+    base: {color: col, weight: 2, opacity: ph ? .75 : .4},
     faint: {color: '#8a8a8a', weight: 1.5, opacity: .3},
     ghost: {color: '#7a6a55', weight: 1.6, opacity: ph ? .9 : .6, dashArray: '4 5'}
   }[style];
   return L.polyline(pts, {...base, ...st}).addTo(G);
 }
-function dot(id, style, G, R) {
-  const s = S[id], col = CATS[s.k[0]].color;
+function dot(i, style, G, R) {
+  const s = S[i], col = CATS[s.k[0]].color;
   const st = {
     normal: {radius: 3, weight: 1.2, color: col, fillColor: '#fff', fillOpacity: 1},
     faint: {radius: 2, weight: 1, color: '#999', fillColor: '#ddd', fillOpacity: .5, opacity: .5},
     closed: {radius: 3, weight: 1, color: '#999', fillColor: '#ccc', fillOpacity: .6, opacity: .7},
     new: {radius: 6, weight: 2, color: '#c62828', fillColor: '#ffd54f', fillOpacity: 1}
   }[style];
-  const m = L.circleMarker(ll(id), {renderer: R, ...st}).addTo(G);
-  if (!quiz.on && style !== 'faint') m.bindPopup(() => card(id), {maxWidth: 270});
+  const m = L.circleMarker(ll(i), {renderer: R, ...st}).addTo(G);
+  if (!quiz.on && style !== 'faint') m.bindPopup(() => card(i), {maxWidth: 280});
   return m;
 }
 function labels(y) {
   lbl.clearLayers();
   if (map.getZoom() < 14 || cmp.on) return;
   const b = map.getBounds(); let n = 0;
-  for (const id in S) {
-    const s = S[id];
-    if (!isOpen(s, y) || !stOn(s) || !onLine(s) || !b.contains(ll(id))) continue;
+  for (const s of S) {
+    if (!isOpen(s, y) || !stOn(s) || !onLineS(s) || !b.contains([s.lat, s.lon])) continue;
     if (++n > 250) break;
-    L.marker(ll(id), {icon: L.divIcon({className: 'lbl', html: `<span style="left:7px;top:-8px">${esc(s.n)}</span>`, iconSize: [0, 0]}), interactive: false}).addTo(lbl);
+    L.marker([s.lat, s.lon], {icon: L.divIcon({className: 'lbl', html: `<span style="left:7px;top:-8px">${esc(s.n)}</span>`, iconSize: [0, 0]}), interactive: false}).addTo(lbl);
   }
 }
 
@@ -259,65 +173,97 @@ function draw(y, animate) {
   if (cmp.on) return drawCompare();
   const g = ++gen;
   layer.clearLayers(); fx.clearLayers();
-  const z = map.getZoom(), newEdges = [], newSt = [];
-  for (const r of EI.values()) {
-    if (!opt.cats[r.cat]) continue;
-    const fo = !focus || (onLine(S[r.p]) && onLine(S[r.q]));
-    if (present(r, y)) {
-      if (isNewEdge(r, y) && fo) newEdges.push(r);
-      else line(r, !fo ? 'faint' : opt.emph ? 'base' : 'full', layer, R0);
-    } else if (opt.ghost && ghostAt(r, y)) line(r, 'ghost', layer, R0);
+  const z = map.getZoom(), newP = [], newSt = [];
+  for (const p of P) {
+    if (!opt.cats[p.cat]) continue;
+    const fo = onLineP(p);
+    if (present(p, y)) {
+      if (isNewP(p, y) && fo) newP.push(p);
+      else line(p, !fo ? 'faint' : opt.emph ? 'base' : 'full', layer, R0);
+    } else if (opt.ghost && ghostAt(p, y)) line(p, 'ghost', layer, R0);
   }
   let shown = 0;
-  for (const id in S) {
-    const s = S[id];
+  for (const s of S) {
     if (!stOn(s)) continue;
-    const open = isOpen(s, y), fo = onLine(s);
+    const open = isOpen(s, y), fo = onLineS(s);
     if (open) shown++;
-    if (open && s.o === y && fo) newSt.push(id);
-    else if (open) { if (focus ? true : z >= 11) dot(id, fo ? 'normal' : 'faint', layer, R0); }
-    else if (s.c === y && z >= 11 && fo) dot(id, 'closed', layer, R0);
+    const newHere = focus == null ? s.o === y : s.ls.some(t => t[0] === focus && t[1] === y);
+    if (open && newHere && fo) newSt.push(s.i);
+    else if (open) { if (focus != null ? true : z >= 11) dot(s.i, fo ? 'normal' : 'faint', layer, R0); }
+    else if (s.c === y && z >= 11 && fo) dot(s.i, 'closed', layer, R0);
   }
-  newSt.sort((a, b) => S[a].od < S[b].od ? -1 : S[a].od > S[b].od ? 1 : 0);
-  lastNew = newSt.length;
-  if (animate) animateYear(y, newSt, newEdges, g);
-  else { newEdges.forEach(r => line(r, 'new', fx, R0)); newSt.forEach(id => dot(id, 'new', fx, R0)); }
+  const order = popOrder(y, newSt, newP);
+  lastNew = order.length; lastOrder = order;
+  if (animate) animateYear(y, order, newP, g);
+  else { newP.forEach(p => line(p, 'new', fx, R0)); order.forEach(i => dot(i, 'new', fx, R0)); }
   labels(y);
   $('year').textContent = y;
   $('era').textContent = era(y);
   $('cnt').textContent = '駅数 ' + shown;
-  $('news').textContent = newSt.length ? 'この年の開業：' + newSt.slice(0, 15).map(id => S[id].n).join('、') + (newSt.length > 15 ? ` ほか${newSt.length - 15}駅` : '') : '';
+  $('news').textContent = order.length ? 'この年の開業：' + order.slice(0, 15).map(i => S[i].n).join('、') + (order.length > 15 ? ` ほか${order.length - 15}駅` : '') : '';
   background(y); spark(y);
   if (opt.gogai && !quiz.on && EV[y]) gogai(y);
   else if (!animate) $('gogai').classList.remove('show');
-  if (animate && opt.follow && newSt.length && !quiz.on) {
-    const c = L.latLngBounds(newSt.map(ll)).getCenter();
+  if (animate && opt.follow && order.length && !quiz.on) {
+    const c = L.latLngBounds(order.map(ll)).getCenter();
     if (!map.getBounds().pad(-0.15).contains(c)) map.panTo(c, {duration: 0.6});
   }
 }
 
-// 同じ年の駅を、開業日の順に一つずつポンポンと出す
-const popStep = n => { const s = clamp(+$('speed').value / 4, 30, 220); return n > 30 ? s * 30 / n : s; };
-const delay = y => +$('speed').value * (EV[y] && opt.gogai ? 4 : 1) + Math.min(lastNew, 30) * clamp(+$('speed').value / 4, 30, 220) + 200;
-function animateYear(y, newSt, newEdges, g) {
-  const step = popStep(newSt.length), t = {};
-  newSt.forEach((id, i) => { t[id] = i * step; });
-  newSt.forEach((id, i) => setTimeout(() => {
+// 新しい駅の出る順番：すでにある駅から、新しい線路をたどって近い順に
+function popOrder(y, newSt, newP) {
+  const isNew = new Set(newSt), adj = new Map(), seen = new Set(), out = [];
+  for (const p of newP) {
+    if (p.a < 0 || p.b < 0) continue;
+    if (!adj.has(p.a)) adj.set(p.a, []); if (!adj.has(p.b)) adj.set(p.b, []);
+    adj.get(p.a).push(p.b); adj.get(p.b).push(p.a);
+  }
+  let q = [];
+  for (const [n] of adj) if (!isNew.has(n) && isOpen(S[n], y)) { seen.add(n); q.push(n); }
+  while (q.length) {
+    const nx = [];
+    for (const n of q) for (const m of adj.get(n) || []) if (!seen.has(m)) { seen.add(m); if (isNew.has(m)) out.push(m); nx.push(m); }
+    q = nx;
+  }
+  // 端の駅（つながりが1本）から始める
+  const rest = newSt.filter(i => !seen.has(i)).sort((a, b) => ((adj.get(a) || []).length > 1) - ((adj.get(b) || []).length > 1));
+  // 古い駅につながっていない新しい路線は、端からたどる
+  for (const i of rest) {
+    if (seen.has(i)) continue;
+    seen.add(i); out.push(i); let fr = [i];
+    while (fr.length) { const nx = []; for (const n of fr) for (const m of adj.get(n) || []) if (!seen.has(m)) { seen.add(m); if (isNew.has(m)) out.push(m); nx.push(m); } fr = nx; }
+  }
+  return out;
+}
+
+// 同じ年の駅を一つずつポンポンと出し、線路はつながった時に伸ばす
+const baseStep = () => clamp(+$('speed').value / 4, 30, 220);
+const popStep = n => n > 30 ? baseStep() * 30 / n : baseStep();
+const delay = y => +$('speed').value * (EV[y] && opt.gogai ? 4 : 1) + Math.min(lastNew, 30) * baseStep() + 250;
+function animateYear(y, order, newP, g) {
+  const step = popStep(order.length), t = {};
+  order.forEach((i, k) => { t[i] = k * step; });
+  order.forEach((i, k) => setTimeout(() => {
     if (g !== gen) return;
-    popDot(id, g);
-    if (i < 40) beep([PENTA[i % PENTA.length]], 0.12, 0.035);
-  }, t[id]));
+    popDot(i, g);
+    if (k < 40) beep([PENTA[k % PENTA.length]], 0.12, 0.035);
+  }, t[i]));
   if (EV[y] && opt.gogai) beep([523, 659], 0.7, 0.1);
-  const dur = Math.min(650, step * 4 + 250);
-  let trains = 0;
-  for (const r of newEdges) {
-    const tp = t[r.p] || 0, tq = t[r.q] || 0, [from, to] = tp <= tq ? [r.p, r.q] : [r.q, r.p];
-    const icon = trains++ < 6 ? trainIcon(y) : null;
-    setTimeout(() => { if (g === gen) growLine(r, from, to, dur, icon, g); }, Math.max(tp, tq));
+  const dur = Math.min(700, step * 4 + 300);
+  let trains = 0, freeAt = -1e9;
+  newP.sort((p, q) => Math.max(t[p.a] || 0, t[p.b] || 0) - Math.max(t[q.a] || 0, t[q.b] || 0));
+  for (const p of newP) {
+    const ta = t[p.a] || 0, tb = t[p.b] || 0, due = Math.max(ta, tb);
+    const pts = ta <= tb ? p.pts : p.pts.slice().reverse();
+    // 列車は前の列車が走り終えてから（同じ場所に重ならないように）
+    let icon = null;
+    if (trains < 6 && due >= freeAt && pathLen(pts) > 0.008) { icon = trainIcon(y); trains++; freeAt = due + dur; }
+    setTimeout(() => { if (g === gen) growLine(p, pts, dur, icon, g); }, Math.max(ta, tb));
   }
 }
-function popDot(id, g) {
-  const m = dot(id, 'new', fx, R0); m.setRadius(0);
+function pathLen(pts) { let d = 0; for (let i = 1; i < pts.length; i++) d += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return d; }
+function popDot(i, g) {
+  const m = dot(i, 'new', fx, R0); m.setRadius(0);
   const t0 = performance.now();
   (function step(now) {
     if (g !== gen) return;
@@ -326,16 +272,22 @@ function popDot(id, g) {
     if (k < 1) requestAnimationFrame(step);
   })(t0);
 }
-function growLine(r, from, to, dur, icon, g) {
-  const A = L.latLng(ll(from)), B = L.latLng(ll(to));
-  const halo = L.polyline([A, A], {renderer: R0, interactive: false, color: '#ffd54f', weight: 9, opacity: .65}).addTo(fx);
-  const ln = L.polyline([A, A], {renderer: R0, interactive: false, color: CATS[r.cat].color, weight: 3.5}).addTo(fx);
-  const mk = icon ? L.marker(A, {icon: L.divIcon({className: 'train', html: icon, iconSize: [20, 20]}), interactive: false}).addTo(fx) : null;
+function growLine(p, pts, dur, icon, g) {
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const total = cum[cum.length - 1] || 1e-9;
+  const halo = L.polyline([pts[0], pts[0]], {renderer: R0, interactive: false, color: '#ffd54f', weight: 9, opacity: .65}).addTo(fx);
+  const ln = L.polyline([pts[0], pts[0]], {renderer: R0, interactive: false, color: CATS[p.cat].color, weight: 3.5}).addTo(fx);
+  const mk = icon ? L.marker(pts[0], {icon: L.divIcon({className: 'train', html: icon, iconSize: [20, 20]}), interactive: false}).addTo(fx) : null;
   const t0 = performance.now();
   (function step(now) {
     if (g !== gen) return;
-    const k = Math.min(1, (now - t0) / dur), P = L.latLng(A.lat + (B.lat - A.lat) * k, A.lng + (B.lng - A.lng) * k);
-    halo.setLatLngs([A, P]); ln.setLatLngs([A, P]); if (mk) mk.setLatLng(P);
+    const k = Math.min(1, (now - t0) / dur), d = k * total;
+    let j = 1; while (j < pts.length - 1 && cum[j] < d) j++;
+    const r = (d - cum[j - 1]) / ((cum[j] - cum[j - 1]) || 1e-9);
+    const P1 = [pts[j - 1][0] + (pts[j][0] - pts[j - 1][0]) * Math.min(1, r), pts[j - 1][1] + (pts[j][1] - pts[j - 1][1]) * Math.min(1, r)];
+    const part = pts.slice(0, j).concat([P1]);
+    halo.setLatLngs(part); ln.setLatLngs(part); if (mk) mk.setLatLng(P1);
     if (k < 1) requestAnimationFrame(step); else if (mk) fx.removeLayer(mk);
   })(t0);
 }
@@ -345,16 +297,16 @@ function background(y) {
   const t = clamp((1970 - y) / 90, 0, 1), c = pale.getContainer();
   if (c) c.style.filter = `sepia(${t}) saturate(${1 - .3 * t}) brightness(${1 - .06 * t})`;
   let note = '';
-  const P = opt.bg === 'photo' ? PHOTOS.find(p => y >= p[0] && y <= p[1]) : null;
-  if (P) {
-    if (photoId !== P[2]) {
+  const ph = opt.bg === 'photo' ? PHOTOS.find(p => y >= p[0] && y <= p[1]) : null;
+  if (ph) {
+    if (photoId !== ph[2]) {
       if (photo) map.removeLayer(photo);
-      photo = L.tileLayer(`https://cyberjapandata.gsi.go.jp/xyz/${P[2]}/{z}/{x}/{y}.jpg`, {
-        maxZoom: 18, maxNativeZoom: P[2] === 'seamlessphoto' ? 18 : 17, minZoom: P[2] === 'seamlessphoto' ? 0 : 10
+      photo = L.tileLayer(`https://cyberjapandata.gsi.go.jp/xyz/${ph[2]}/{z}/{x}/{y}.jpg`, {
+        maxZoom: 18, maxNativeZoom: ph[2] === 'seamlessphoto' ? 18 : 17, minZoom: ph[2] === 'seamlessphoto' ? 0 : 10
       }).addTo(map);
-      photoId = P[2];
+      photoId = ph[2];
     }
-    note = '空中写真：' + P[3] + (map.getZoom() < 10 && P[2] !== 'seamlessphoto' ? '（拡大すると表示）' : '');
+    note = '空中写真：' + ph[3] + (map.getZoom() < 10 && ph[2] !== 'seamlessphoto' ? '（拡大すると表示）' : '');
   } else {
     if (photo) { map.removeLayer(photo); photo = null; photoId = ''; }
     if (opt.bg === 'photo') note = 'この時代の空中写真はありません';
@@ -377,7 +329,6 @@ function beep(freqs, len, vol) {
 }
 let gTimer = null;
 function gogai(y) {
-  if (!EV[y]) return;
   $('gEra').textContent = y + '年（' + era(y) + '）';
   $('gText').textContent = EV[y];
   $('gogai').classList.add('show');
@@ -398,33 +349,38 @@ function spark(y) {
 }
 
 // ---------- 駅カード ----------
-function card(id) {
-  const s = S[id];
-  const same = Object.values(S).filter(x => x !== s && x.o === s.o)
+function neighborsAt(i, y) {
+  const out = new Set();
+  for (const j of S[i].p) { const p = P[j]; if (!present(p, y)) continue; const o = p.a === i ? p.b : p.a; if (o >= 0 && o !== i) out.add(S[o].n); }
+  return [...out];
+}
+function card(i) {
+  const s = S[i];
+  const same = S.filter(x => x !== s && x.o === s.o)
     .sort((a, b) => ((a.lat - s.lat) ** 2 + (a.lon - s.lon) ** 2) - ((b.lat - s.lat) ** 2 + (b.lon - s.lon) ** 2));
-  const nb = reach(id, s.o).map(x => S[x].n);
-  const ls = lines(s);
-  return `<div class="cardS"><div class="cn">${esc(s.n)}</div><div class="cl">${esc(ls.join('・'))}${s.op ? '<br>' + esc(s.op) : ''}</div>
-  <div>開業：<b>${fmtDate(s.od)}</b>（${era(s.o)}）</div>
+  const nb = neighborsAt(i, s.o);
+  const ls = s.ls.map(([l, o]) => `${esc(LN[l])}（${o}年〜）`).join('<br>');
+  return `<div class="cardS"><div class="cn">${esc(s.n)}</div><div class="cl">${ls}</div>
+  <div>開業：<b>${s.o}年</b>（${era(s.o)}）</div>
   <div>${s.c ? `${s.c}年に廃止` : `今年で <b>${Y1 - s.o}歳</b>`}</div>
-  ${nb.length ? `<div>開業時につながった駅：${esc(nb.join('・'))}</div>` : ''}
+  ${nb.length ? `<div>開業時の隣の駅：${esc(nb.join('・'))}</div>` : ''}
   <div>同じ年に開業：${same.length}駅${same.length ? '（' + esc(same.slice(0, 4).map(x => x.n).join('・')) + (same.length > 4 ? ' など' : '') + '）' : ''}</div>
-  <div class="row" style="margin-top:6px"><button data-act="year" data-id="${id}">開業した年へ</button>
-  ${ls.slice(0, 2).map(l => `<button data-act="story" data-line="${esc(l)}">📖 ${esc(l)}</button>`).join('')}</div></div>`;
+  <div class="row" style="margin-top:6px"><button data-act="year" data-id="${i}">開業した年へ</button>
+  ${s.ls.slice(0, 3).map(([l]) => `<button data-act="story" data-line="${l}">📖 ${esc(LN[l])}</button>`).join('')}</div></div>`;
 }
 map.on('popupopen', e => {
   e.popup.getElement().querySelectorAll('button[data-act]').forEach(b => {
     b.onclick = () => {
-      if (b.dataset.act === 'year') goStation(b.dataset.id, false);
-      else { map.closePopup(); if (cmp.on) cmpEnd(); storyStart(b.dataset.line); }
+      if (b.dataset.act === 'year') goStation(+b.dataset.id, false);
+      else { map.closePopup(); if (cmp.on) cmpEnd(); if (quiz.on) qQuit(); storyStart(+b.dataset.line); }
     };
   });
 });
-function goStation(id, fly) {
-  const s = S[id];
+function goStation(i, fly) {
+  const s = S[i];
   stop(); $('slider').value = s.o; draw(s.o, false);
-  if (fly) map.flyTo(ll(id), 13, {duration: 1.2});
-  setTimeout(() => L.popup({maxWidth: 270}).setLatLng(ll(id)).setContent(card(id)).openOn(map), fly ? 1300 : 50);
+  if (fly) map.flyTo(ll(i), 13, {duration: 1.2});
+  setTimeout(() => L.popup({maxWidth: 280}).setLatLng(ll(i)).setContent(card(i)).openOn(map), fly ? 1300 : 50);
 }
 
 // ---------- 再生 ----------
@@ -471,12 +427,11 @@ function redraw() { if (cmp.on) drawCompare(); else draw(curYear(), false); }
 // ---------- 駅さがし ----------
 function findStation() {
   const q = $('q').value.trim(); if (!q) return;
-  const all = Object.keys(S);
-  let hit = all.filter(id => S[id].n === q || S[id].n === q + '駅');
-  if (!hit.length) hit = all.filter(id => S[id].n.includes(q));
+  let hit = S.filter(s => s.n === q || s.n === q + '駅');
+  if (!hit.length) hit = S.filter(s => s.n.includes(q));
   if (!hit.length) { $('news').textContent = '「' + q + '」は見つかりませんでした'; return; }
-  hit.sort((a, b) => S[a].o - S[b].o);
-  goStation(hit[0], true);
+  hit.sort((a, b) => (a.c == null ? 0 : 1) - (b.c == null ? 0 : 1) || a.o - b.o);
+  goStation(hit[0].i, true);
 }
 $('find').onclick = findStation;
 $('q').onkeydown = e => { if (e.key === 'Enter') findStation(); };
@@ -490,25 +445,25 @@ const TOTAL = 5;
 function qShowYear() { const v = +$('qSlider').value; $('qYear').textContent = v; $('qEra').textContent = era(v); }
 $('qSlider').max = Y1; $('qSlider').oninput = qShowYear;
 function qStart() {
-  if (!Object.keys(S).length) return;
+  if (!S.length) return;
   stop(); map.closePopup(); Object.assign(quiz, {on: true, n: 0, score: 0});
   showCard('quiz'); qNext();
 }
 function qNext() {
   if (quiz.n >= TOTAL) return qEnd();
   quiz.n++; quiz.phase = 'ask';
-  const pool = Object.keys(S).filter(id => S[id].c == null && stOn(S[id]));
-  quiz.t = pool[Math.floor(Math.random() * pool.length)];
-  const s = S[quiz.t];
+  const pool = S.filter(s => s.c == null && stOn(s) && !/（/.test(s.n));
+  const s = pool[Math.floor(Math.random() * pool.length)];
+  quiz.t = s.i;
   $('slider').value = Y1; draw(Y1, false);
   $('qHead').textContent = `第${quiz.n}問／全${TOTAL}問　この駅、何年生まれ？`;
   $('qScore').textContent = quiz.score + '点';
-  $('qName').textContent = s.n; $('qLine').textContent = s.l;
+  $('qName').textContent = s.n; $('qLine').textContent = s.ls.map(([l]) => LN[l]).join('・');
   $('qSlider').value = 1930; qShowYear();
   $('qAsk').style.display = 'block'; $('qRes').innerHTML = ''; $('qNext').style.display = 'none';
   if (quiz.ring) map.removeLayer(quiz.ring);
-  quiz.ring = L.marker(ll(quiz.t), {icon: L.divIcon({className: '', html: '<div class="pulse"></div>', iconSize: [30, 30]}), interactive: false}).addTo(map);
-  map.flyTo(ll(quiz.t), 12, {duration: 1});
+  quiz.ring = L.marker(ll(s.i), {icon: L.divIcon({className: '', html: '<div class="pulse"></div>', iconSize: [30, 30]}), interactive: false}).addTo(map);
+  map.flyTo(ll(s.i), 12, {duration: 1});
 }
 function qAnswer() {
   const s = S[quiz.t], g = +$('qSlider').value, d = Math.abs(g - s.o), p = Math.max(0, 100 - d * 4);
@@ -542,31 +497,40 @@ $('qQuit').onclick = qQuit;
 const story = {steps: [], i: 0, ids: [], auto: false, timer: null};
 $('storyBtn').onclick = () => { stop(); showCard('story'); $('sPick').style.display = 'block'; $('sMain').style.display = 'none'; $('sLine').focus(); };
 $('sCancel').onclick = () => showCard('panel');
-$('sGo').onclick = () => storyStart($('sLine').value.trim());
+$('sGo').onclick = () => {
+  const q = $('sLine').value.trim(); if (!q) return;
+  const i = LN.indexOf(q) >= 0 ? LN.indexOf(q) : lineList.find(k => LN[k].includes(q));
+  if (i == null || i < 0) { $('sLine').value = ''; $('sLine').placeholder = '見つかりませんでした'; return; }
+  storyStart(i);
+};
 $('sLine').onkeydown = e => { if (e.key === 'Enter') $('sGo').onclick(); };
-function storyStart(name) {
-  if (!name) return;
-  let ln = lineList.find(l => l === name) || lineList.find(l => l.includes(name)) || name;
-  const ids = Object.keys(S).filter(id => lines(S[id]).includes(ln));
-  if (ids.length < 2) { showCard('story'); $('sPick').style.display = 'block'; $('sMain').style.display = 'none'; $('sLine').value = name; $('sLine').placeholder = '見つかりませんでした'; return; }
-  stop(); focus = ln;
-  story.ids = ids;
-  story.steps = [...new Set(ids.flatMap(id => S[id].c ? [S[id].o, S[id].c] : [S[id].o]))].filter(y => y >= Y0 && y <= Y1).sort((a, b) => a - b);
+function storyStart(li) {
+  const ids = S.filter(s => s.ls.some(t => t[0] === li)).map(s => s.i);
+  const ps = P.filter(p => p.l === li);
+  if (!ids.length && !ps.length) return;
+  stop(); map.closePopup(); focus = li; story.ids = ids;
+  const ys = new Set();
+  for (const i of ids) { for (const [l, o] of S[i].ls) if (l === li) ys.add(o); if (S[i].c) ys.add(S[i].c); }
+  for (const p of ps) { if (p.o) ys.add(p.s); if (p.g && p.e) ys.add(p.e + 1); }
+  story.steps = [...ys].filter(y => y >= Y0 && y <= Y1).sort((a, b) => a - b);
   showCard('story'); $('sPick').style.display = 'none'; $('sMain').style.display = 'block';
-  $('sTitle').textContent = '📖 ' + ln;
-  map.fitBounds(L.latLngBounds(ids.map(ll)).pad(0.15));
+  $('sTitle').textContent = '📖 ' + LN[li];
+  const pts = ps.flatMap(p => [p.pts[0], p.pts[p.pts.length - 1]]).concat(ids.map(ll));
+  if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.12));
   setTimeout(() => storyGo(0, true), 700);
 }
-function storyGo(i, animate) {
-  story.i = clamp(i, 0, story.steps.length - 1);
+function storyGo(k, animate) {
+  story.i = clamp(k, 0, story.steps.length - 1);
   const y = story.steps[story.i];
   $('slider').value = y; draw(y, animate);
-  const op = story.ids.filter(id => S[id].o === y).sort((a, b) => S[a].od < S[b].od ? -1 : 1);
-  const cl = story.ids.filter(id => S[id].c === y);
+  const rank = new Map(lastOrder.map((i, k) => [i, k]));
+  const op = story.ids.filter(i => S[i].ls.some(t => t[0] === focus && t[1] === y)).sort((a, b) => (rank.get(a) ?? 1e9) - (rank.get(b) ?? 1e9));
+  const cl = story.ids.filter(i => S[i].c === y);
   let txt = `<b>${y}年（${era(y)}）</b>`;
   if (EV[y]) txt += `<br><span style="color:#6b5a44">${esc(EV[y])}</span>`;
-  if (op.length) txt += `<br>${esc(op.map(id => S[id].n).join('・'))} が開業`;
-  if (cl.length) txt += `<br>${esc(cl.map(id => S[id].n).join('・'))} が廃止`;
+  if (op.length) txt += `<br>${esc(op.map(i => S[i].n).join('・'))} が開業`;
+  if (cl.length) txt += `<br>${esc(cl.map(i => S[i].n).join('・'))} が廃止`;
+  if (!op.length && !cl.length) txt += '<br>線路が変わりました';
   $('sText').innerHTML = txt;
   $('sCount').textContent = `${story.i + 1}／${story.steps.length}`;
 }
@@ -591,12 +555,12 @@ $('sQuit').onclick = () => { storyAuto(false); focus = null; showCard('panel'); 
 const cmp = {on: false, x: .5};
 $('cmpA').max = Y1; $('cmpB').max = Y1;
 function staticInto(y, G, R) {
-  for (const r of EI.values()) {
-    if (!opt.cats[r.cat]) continue;
-    if (present(r, y)) line(r, 'full', G, R);
-    else if (opt.ghost && ghostAt(r, y)) line(r, 'ghost', G, R);
+  for (const p of P) {
+    if (!opt.cats[p.cat]) continue;
+    if (present(p, y)) line(p, 'full', G, R);
+    else if (opt.ghost && ghostAt(p, y)) line(p, 'ghost', G, R);
   }
-  if (map.getZoom() >= 11) for (const id in S) if (isOpen(S[id], y) && stOn(S[id])) dot(id, 'normal', G, R);
+  if (map.getZoom() >= 11) for (const s of S) if (isOpen(s, y) && stOn(s)) dot(s.i, 'normal', G, R);
 }
 function drawCompare() {
   gL.clearLayers(); gR.clearLayers();
@@ -641,23 +605,21 @@ $('cmpA').oninput = $('cmpB').oninput = drawCompare;
 })();
 
 // ---------- 起動 ----------
-async function start(useCache) {
-  stop(); $('msg').style.display = 'block';
-  $('msg').textContent = '駅データを読み込み中…（初回は数十秒かかることがあります）';
+async function start() {
+  $('msg').style.display = 'block';
+  $('msg').textContent = '線路データを読み込み中…';
   try {
-    S = await load(useCache);
-    $('msg').textContent = '下ごしらえ中…';
-    await new Promise(r => setTimeout(r, 30));
+    await load();
     prep();
     $('msg').style.display = 'none';
     draw(curYear(), false);
   } catch (e) {
     $('msg').innerHTML = '読み込みに失敗しました（' + esc(e.message) + '）。<button id="retry">もう一度</button>';
-    $('retry').onclick = () => start(false);
+    $('retry').onclick = () => start();
   }
 }
 $('slider').max = Y1;
-$('reload').onclick = () => start(false);
-start(true);
+try { localStorage.removeItem('eki_data_v3'); localStorage.removeItem('railmap_kanto_v1'); } catch (e) {}
+start();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('./sw.js', {scope: './'}).catch(() => {});

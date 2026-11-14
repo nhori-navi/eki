@@ -1,7 +1,7 @@
 // 鉄道のひろがり（/eki/）のサービスワーカー
 // 同じアドレスのほかのアプリとキャッシュ置き場を共有しているので、"eki" で始まるものだけを扱う
-const CACHE = 'eki-v1';
-const SHELL = ['./', './index.html', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
+const CACHE = 'eki-v2';
+const SHELL = ['./', './index.html', './app.js', './rails.json', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
@@ -26,5 +26,5 @@ self.addEventListener('fetch', e => {
       const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r;
     })));
   }
-  // 地図タイルとWikidataはそのまま通す
+  // 地図タイルはそのまま通す
 });
