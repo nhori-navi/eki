@@ -83,7 +83,7 @@ const curYear = () => +$('slider').value;
 
 // ---------- データ ----------
 async function load() {
-  const r = await fetch('rails.json');
+  const r = await fetch('rails.json?v=4');
   if (!r.ok) throw new Error('rails.json: HTTP ' + r.status);
   const d = await r.json();
   LN = d.L;
@@ -622,4 +622,4 @@ $('slider').max = Y1;
 try { localStorage.removeItem('eki_data_v3'); localStorage.removeItem('railmap_kanto_v1'); } catch (e) {}
 start();
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('./sw.js', {scope: './'}).catch(() => {});
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('./sw.js', {scope: './'}).catch(() => {});
