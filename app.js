@@ -50,14 +50,15 @@ const EV = {
 };
 const ERAS = [['明治', 1872], ['大正', 1912], ['昭和（戦前）', 1926], ['戦後', 1945], ['高度成長期', 1955], ['平成', 1989], ['令和', 2019]];
 // 地理院タイルの年代別空中写真 [この年から, この年まで, タイルID, 説明]
+// [この年から, この年まで, タイルID, 説明, 画像の形式]（1945〜1969年の写真だけ png）
 const PHOTOS = [
-  [1945, 1960, 'ort_USA10', '1945〜1950年撮影（一部地域のみ）'],
-  [1961, 1973, 'ort_old10', '1961〜1969年撮影'],
-  [1974, 1978, 'gazo1', '1974〜1978年撮影'],
-  [1979, 1983, 'gazo2', '1979〜1983年撮影'],
-  [1984, 1987, 'gazo3', '1984〜1986年撮影'],
-  [1988, 2003, 'gazo4', '1988〜1990年撮影'],
-  [2004, 9999, 'seamlessphoto', '最新の写真']
+  [1945, 1960, 'ort_USA10', '1945〜1950年撮影（一部地域のみ）', 'png'],
+  [1961, 1973, 'ort_old10', '1961〜1969年撮影', 'png'],
+  [1974, 1978, 'gazo1', '1974〜1978年撮影', 'jpg'],
+  [1979, 1983, 'gazo2', '1979〜1983年撮影', 'jpg'],
+  [1984, 1987, 'gazo3', '1984〜1986年撮影', 'jpg'],
+  [1988, 2003, 'gazo4', '1988〜1990年撮影', 'jpg'],
+  [2004, 9999, 'seamlessphoto', '最新の写真', 'jpg']
 ];
 const PENTA = [659, 784, 880, 988, 1175, 1319, 1568];
 
@@ -88,7 +89,7 @@ const curYear = () => +$('slider').value;
 
 // ---------- データ ----------
 async function load() {
-  const r = await fetch('rails.json?v=8');
+  const r = await fetch('rails.json?v=8.1');
   if (!r.ok) throw new Error('rails.json: HTTP ' + r.status);
   const d = await r.json();
   LN = d.L;
@@ -324,7 +325,7 @@ function background(y) {
   if (ph) {
     if (photoId !== ph[2]) {
       if (photo) map.removeLayer(photo);
-      photo = L.tileLayer(`https://cyberjapandata.gsi.go.jp/xyz/${ph[2]}/{z}/{x}/{y}.jpg`, {
+      photo = L.tileLayer(`https://cyberjapandata.gsi.go.jp/xyz/${ph[2]}/{z}/{x}/{y}.${ph[4]}`, {
         maxZoom: 18, maxNativeZoom: ph[2] === 'seamlessphoto' ? 18 : 17, minZoom: ph[2] === 'seamlessphoto' ? 0 : 10
       }).addTo(map);
       photoId = ph[2];
@@ -720,8 +721,9 @@ $('cmpA').oninput = $('cmpB').oninput = drawCompare;
 })();
 
 // ---------- 版の表示とお知らせ ----------
-const APP_VER = 8;
+const APP_VER = 8.1;
 const HISTORY = [
+  [8.1, ['不具合の修正：1945〜1969年の空中写真が表示されなかったのを直しました']],
   [8, ['🚂 乗ってみるに「眺め」：前を見る（進む方向が上）・横の窓・北が上を選べる', '乗車中は、その時代の空中写真の上を走る（1945年より前はセピア色の地図）', '👻 廃線探検：廃止された区間を光らせ、一覧から選ぶと場所と年代、最後の年に乗ることも', '🌙 夜の地図：背景を暗くして線路が光って見える']],
   [7, ['パネルを1段にまとめ、道具は「≡ メニュー」へ。ボタンを大きく、駅の点も押しやすく', '色の凡例をいつも表示。廃線は灰色の点線に', '⭐ 見どころ再生（静かな年は早送り）と、再生する期間の指定', '🚂 乗ってみるが本格的に：切符と改札、発車の音（汽笛・発車ベル・発車メロディ）、ガタンゴトン、加速と減速、揺れ、速度計と時計、車内の文字案内', '🔗 この画面を共有（年・場所・路線をリンクで送れる）', '初めての人向けの使い方案内、パソコンのキー操作（スペース：再生、←→：1年、Shift＋←→：10年、M：メニュー）']],
   [6, ['🚂「乗ってみる」：その時代の列車に乗って、駅名標を見ながら路線を走る（当時の所要時間の目安つき）', '🎂「わたしの年表」：生まれた年を入れると、同い年の駅や、年ごとの自分の年齢が地図に出る']],
@@ -1165,7 +1167,7 @@ $('rRev').onclick = () => { if ($('rSound').checked) ac(); rideStart(ride.li, ri
 $('rView').onchange = () => { if (!map.setBearing) return; if ($('rView').value === 'north') map.setBearing(0); else if (ride.R) { ride.bear = targetBearing(ride.R, ride.pos); map.setBearing(ride.bear); } };
 $('rScene').onchange = () => { if (RIDING) background(ride.y); };
 $('rSound').onchange = () => { if ($('rSound').checked) { ac(); if (ride.on && !ride.rumble) rumbleStart(); } else rumbleStop(); };
-$('rQuit').onclick = () => { $('ride').querySelector('.gl').textContent = '⠿ 🚂 乗ってみる'; rideStop(); focus = null; showCard('panel'); map.setZoom(11); draw(curYear(), false); };
+$('rQuit').onclick = () => { $('ride').querySelector('.gl').textContent = '⠿ 🚂 乗ってみる'; rideStop(); focus = null; showCard('panel'); map.setZoom(11, {animate: false}); draw(curYear(), false); };
 
 // 地図の、パネルに隠れていない部分に収まるように表示する
 function fitVisible(b, fly) {

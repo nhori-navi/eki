@@ -1,7 +1,7 @@
 // 鉄道のひろがり（/eki/）のサービスワーカー
 // 同じアドレスのほかのアプリとキャッシュ置き場を共有しているので、"eki" で始まるものだけを扱う
-const CACHE = 'eki-v8';
-const SHELL = ['./', './index.html', './app.js?v=8', './rails.json?v=8', './manifest.json', './icon-192.png', './icon-512.png'];
+const CACHE = 'eki-v8.1';
+const SHELL = ['./', './index.html', './app.js?v=8.1', './rails.json?v=8.1', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
