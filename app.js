@@ -62,7 +62,8 @@ const PHOTOS = [
 const PENTA = [659, 784, 880, 988, 1175, 1319, 1568];
 
 // ---------- 設定（この端末に記憶） ----------
-const opt = {cats: {shin: 1, jr: 1, pvt: 1, sub: 1, tram: 1}, emph: true, ghost: true, follow: true, gogai: true, sound: false, bg: 'pale'};
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches, COARSE = matchMedia('(pointer: coarse)').matches;
+const opt = {cats: {shin: 1, jr: 1, pvt: 1, sub: 1, tram: 1}, emph: true, ghost: true, follow: true, gogai: true, sound: false, bg: 'pale', legend: true, shake: !REDUCED};
 try { Object.assign(opt, JSON.parse(localStorage.getItem(PREF) || '{}'), {sound: false}); } catch (e) {}
 const savePref = () => { try { localStorage.setItem(PREF, JSON.stringify(opt)); } catch (e) {} };
 
@@ -74,19 +75,20 @@ const pale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.
   attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>｜<a href="https://nlftp.mlit.go.jp/ksj/" target="_blank">国土数値情報</a>（国交省）を加工'
 }).addTo(map);
 let photo = null, photoId = '';
-const R0 = L.canvas({padding: 0.3});
+const R0 = L.canvas({padding: 0.3, tolerance: COARSE ? 12 : 6});  // 駅の点を押しやすく
 const layer = L.layerGroup().addTo(map), fx = L.layerGroup().addTo(map), lbl = L.layerGroup().addTo(map);
 map.createPane('cmpL'); map.createPane('cmpR');
 map.getPane('cmpL').style.zIndex = 450; map.getPane('cmpR').style.zIndex = 450;
 const RL = L.canvas({pane: 'cmpL'}), RR = L.canvas({pane: 'cmpR'});
 const gL = L.layerGroup().addTo(map), gR = L.layerGroup().addTo(map);
 
+var RIDING = false;  // 乗車中か
 let LN = [], S = [], P = [], counts = {}, lineList = [], gen = 0, lastNew = 0, lastOrder = [], focus = null;
 const curYear = () => +$('slider').value;
 
 // ---------- データ ----------
 async function load() {
-  const r = await fetch('rails.json?v=6');
+  const r = await fetch('rails.json?v=7');
   if (!r.ok) throw new Error('rails.json: HTTP ' + r.status);
   const d = await r.json();
   LN = d.L;
@@ -136,7 +138,7 @@ const trainIcon = y => y < 1925 ? '🚂' : y < 1964 ? '🚃' : '🚄';
 // ポップアップがパネルの下に隠れないように、パネルのある側に余白をとる
 let PP = {};
 function popPad() {
-  const c = ['panel', 'quiz', 'story', 'cmp', 'ride', 'me'].map($).find(e => getComputedStyle(e).display !== 'none');
+  const c = ['panel', 'menu', 'quiz', 'story', 'cmp', 'ride', 'me'].map($).find(e => getComputedStyle(e).display !== 'none');
   const tl = [20, 20], br = [20, 20];
   if (c) { const r = c.getBoundingClientRect(), H = innerHeight; if (r.top < H / 2) tl[1] = r.bottom + 10; else br[1] = H - r.top + 10; }
   PP = {autoPanPaddingTopLeft: tl, autoPanPaddingBottomRight: br};
@@ -152,9 +154,9 @@ function line(p, style, G, R, pts) {
   }
   const st = {
     full: {color: col, weight: 2.5, opacity: ph ? .95 : .85},
-    base: {color: col, weight: 2, opacity: ph ? .75 : .4},
-    faint: {color: '#8a8a8a', weight: 1.5, opacity: .3},
-    ghost: {color: '#7a6a55', weight: 1.6, opacity: ph ? .9 : .6, dashArray: '4 5'}
+    base: {color: col, weight: 2.2, opacity: ph ? .8 : .55},
+    faint: {color: '#9a9a9a', weight: 1.5, opacity: .3},
+    ghost: {color: ph ? '#eeeeee' : '#8d8d8d', weight: 1.6, opacity: ph ? .9 : .7, dashArray: '2 6'}
   }[style];
   return L.polyline(pts, {...base, ...st}).addTo(G);
 }
@@ -251,7 +253,12 @@ function popOrder(y, newSt, newP) {
 // 同じ年の駅を一つずつポンポンと出し、線路はつながった時に伸ばす
 const baseStep = () => clamp(+$('speed').value / 4, 30, 220);
 const popStep = n => n > 30 ? baseStep() * 30 / n : baseStep();
-const delay = y => +$('speed').value * (EV[y] && opt.gogai ? 4 : 1) + Math.min(lastNew, 30) * baseStep() + 250;
+let hl = false;  // 見どころ再生中
+const delay = y => {
+  if (hl && !EV[y] && y !== opt.birth) return lastNew >= 25 ? 1500 : 110;  // 見どころ再生：開業の多い年だけ少し止まり、静かな年は早送り
+  return +$('speed').value * (EV[y] && opt.gogai ? 4 : 1) + Math.min(lastNew, 30) * baseStep() + 250;
+};
+const rangeFrom = () => (opt.range && opt.range.from) || Y0, rangeTo = () => (opt.range && opt.range.to) || Y1;
 function animateYear(y, order, newP, g) {
   const step = popStep(order.length), t = {};
   order.forEach((i, k) => { t[i] = k * step; });
@@ -403,17 +410,18 @@ function goStation(i, fly) {
 
 // ---------- 再生 ----------
 let timer = null, playing = false;
-function stop() { const was = playing; playing = false; clearTimeout(timer); $('play').textContent = '▶'; if (was && typeof autoFold === 'function') autoFold(false); }
+function stop() { const was = playing; playing = false; hl = false; clearTimeout(timer); $('play').textContent = '▶'; if (was && typeof autoFold === 'function') autoFold(false); }
 function tick() {
   const y = curYear() + 1;
-  if (y > Y1) return stop();
+  if (y > rangeTo()) return stop();
   $('slider').value = y; draw(y, true);
   timer = setTimeout(tick, delay(y));
 }
 $('play').onclick = () => {
   if (playing) return stop();
   playing = true; $('play').textContent = '❚❚'; autoFold(true);
-  if (curYear() >= Y1) { $('slider').value = Y0; draw(Y0, true); timer = setTimeout(tick, delay(Y0)); }
+  const f = rangeFrom();
+  if (curYear() >= rangeTo() || curYear() < f - 1) { $('slider').value = f; draw(f, true); timer = setTimeout(tick, delay(f)); }
   else tick();
 };
 const jump = y => { stop(); $('slider').value = clamp(y, Y0, Y1); draw(curYear(), false); };
@@ -426,16 +434,37 @@ map.on('zoomend', () => { if (cmp.on) drawCompare(); else if (!playing && !story
 map.on('moveend', () => { if (!cmp.on && map.getZoom() >= 14) labels(curYear()); });
 
 // ---------- 表示設定 ----------
-$('optBtn').onclick = () => { const d = $('drawer'); const open = d.style.display !== 'block'; d.style.display = open ? 'block' : 'none'; $('optBtn').classList.toggle('on', open); };
+$('menuBtn').onclick = () => { if (getComputedStyle($('menu')).display !== 'none') return showCard('panel'); stop(); showCard('menu'); placeCards(); };
+$('menuClose').onclick = () => showCard('panel');
+$('hlBtn').onclick = () => { showCard('panel'); stop(); $('slider').value = rangeTo(); hl = true; $('play').onclick(); toast('⭐ 見どころ再生：大きな出来事や開業の多い年はじっくり、静かな年は早送りで進みます', 4000); };
+$('pFrom').value = rangeFrom(); $('pTo').value = rangeTo(); $('pFrom').max = $('pTo').max = Y1;
+$('pFrom').onchange = $('pTo').onchange = () => {
+  let f = clamp(+$('pFrom').value || Y0, Y0, Y1), t = clamp(+$('pTo').value || Y1, Y0, Y1);
+  if (f > t) [f, t] = [t, f];
+  $('pFrom').value = f; $('pTo').value = t; opt.range = {from: f, to: t}; savePref();
+};
 $('chips').innerHTML = Object.entries(CATS).map(([k, c]) => `<label><input type="checkbox" data-cat="${k}"${opt.cats[k] ? ' checked' : ''}><span class="sw" style="background:${c.color}"></span>${c.name}</label>`).join('');
-$('chips').onchange = e => { const k = e.target.dataset.cat; if (!k) return; opt.cats[k] = e.target.checked ? 1 : 0; savePref(); redraw(); };
-for (const k of ['emph', 'ghost', 'follow', 'gogai', 'sound']) {
+$('chips').onchange = e => { const k = e.target.dataset.cat; if (!k) return; opt.cats[k] = e.target.checked ? 1 : 0; savePref(); legend(); redraw(); };
+// 凡例（いつも左上に小さく表示。タップで小さく／大きく）
+function legend() {
+  const el = $('legend');
+  el.style.display = opt.legend && !RIDING ? 'block' : 'none';
+  el.classList.toggle('min', !!opt.legendMin);
+  el.innerHTML = Object.entries(CATS).map(([k, c]) => `<div class="lg${opt.cats[k] ? '' : ' off'}"><span class="sw" style="background:${c.color}"></span>${c.name}</div>`).join('')
+    + `<div class="lg"><span class="sw" style="background:repeating-linear-gradient(90deg,#8d8d8d 0 3px,transparent 3px 7px)"></span>廃線</div>`
+    + `<div class="lg"><span class="sw" style="background:#ffd54f;height:6px"></span>その年の開業</div>`;
+}
+if (opt.legendMin === undefined) opt.legendMin = innerWidth < 500;  // スマホでは最初は小さく
+$('legend').onclick = () => { opt.legendMin = !opt.legendMin; savePref(); legend(); };
+legend();
+for (const k of ['emph', 'ghost', 'follow', 'gogai', 'sound', 'legend', 'shake']) {
   const el = $('o_' + k); el.checked = !!opt[k];
   el.onchange = () => {
     opt[k] = el.checked; savePref();
     if (k === 'sound' && el.checked && !audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
     if (k === 'gogai' && !el.checked) $('gogai').classList.remove('show');
     if (k === 'emph' || k === 'ghost') redraw();
+    if (k === 'legend') legend();
   };
 }
 $('o_bg').value = opt.bg;
@@ -455,7 +484,7 @@ $('find').onclick = findStation;
 $('q').onkeydown = e => { if (e.key === 'Enter') findStation(); };
 
 // ---------- パネルの切り替え ----------
-function showCard(name) { for (const c of ['panel', 'quiz', 'story', 'cmp', 'ride', 'me']) $(c).style.display = c === name ? 'block' : 'none'; }
+function showCard(name) { for (const c of ['panel', 'menu', 'quiz', 'story', 'cmp', 'ride', 'me']) $(c).style.display = c === name ? 'block' : 'none'; }
 
 // ---------- クイズ（3種類） ----------
 const quiz = {on: false, n: 0, score: 0, t: null, ring: null, phase: '', mode: '', ans: null};
@@ -687,8 +716,9 @@ $('cmpA').oninput = $('cmpB').oninput = drawCompare;
 })();
 
 // ---------- 版の表示とお知らせ ----------
-const APP_VER = 6;
+const APP_VER = 7;
 const HISTORY = [
+  [7, ['パネルを1段にまとめ、道具は「≡ メニュー」へ。ボタンを大きく、駅の点も押しやすく', '色の凡例をいつも表示。廃線は灰色の点線に', '⭐ 見どころ再生（静かな年は早送り）と、再生する期間の指定', '🚂 乗ってみるが本格的に：切符と改札、発車の音（汽笛・発車ベル・発車メロディ）、ガタンゴトン、加速と減速、揺れ、速度計と時計、車内の文字案内', '🔗 この画面を共有（年・場所・路線をリンクで送れる）', '初めての人向けの使い方案内、パソコンのキー操作（スペース：再生、←→：1年、Shift＋←→：10年、M：メニュー）']],
   [6, ['🚂「乗ってみる」：その時代の列車に乗って、駅名標を見ながら路線を走る（当時の所要時間の目安つき）', '🎂「わたしの年表」：生まれた年を入れると、同い年の駅や、年ごとの自分の年齢が地図に出る']],
   [5, ['何版かを表示し、版が変わったらお知らせ', 'パネルを好きな場所へ動かせる・たためる（再生中だけ小さくもできる）', '📍「この辺りの鉄道史」：地図の場所を選ぶ（長押し・右クリックでも）と、その辺りに鉄道が来た年と駅の年表', 'クイズが3種類に：「この路線図は何年？」「光っている路線はどれ？」を追加']],
   [4, ['線路を実際の形に（国土数値情報）', '駅が線路をたどって順に出る', '読み込みが止まる不具合を修正']],
@@ -715,6 +745,7 @@ async function versionNotice() {
     if (old) seen = 4;
   }
   if (seen && seen < APP_VER) toast(`<b>🆕 第${APP_VER}版になりました</b>` + histHtml(HISTORY.filter(([v]) => v > seen)));
+  else if (!seen) guide(0);
 }
 
 // ---------- パネルを動かす・たたむ ----------
@@ -772,7 +803,7 @@ function setPlaceMode(on) {
   map.getContainer().style.cursor = on ? 'crosshair' : '';
   if (on) toast('📍 調べたい場所を地図でタップしてください（いつでも、長押し・右クリックでも調べられます）', 5000);
 }
-$('placeBtn').onclick = () => setPlaceMode(!placeMode);
+$('placeBtn').onclick = () => { showCard('panel'); setPlaceMode(true); };
 map.on('click', e => { if (placeMode) { setPlaceMode(false); $('toast').style.display = 'none'; placeInfo(e.latlng); } });
 map.on('contextmenu', e => { if (!cmp.on && !quiz.on) placeInfo(e.latlng); });
 function placeInfo(at) {
@@ -804,9 +835,10 @@ map.on('popupclose', () => placeLayer.clearLayers());
 // ---------- 🚂 乗ってみる ----------
 const rideLayer = L.layerGroup().addTo(map);
 const ride = {on: false, li: null, y: 0, R: null, pos: 0, next: 0, dwell: 0, speed: 1, paused: false, rev: false, mk: null, trail: null, ti: 0, last: 0};
-const KM_PER_SEC = 1.6;  // 画面上の速さ（×1のとき1秒で1.6km）
+const KM_PER_SEC = 1.6;  // 画面上の速さ（×1・最高速のとき1秒で1.6km）
 // 当時の速さの目安（km/h、停車時間込みのおおよそ）
-const eraKmh = (y, cat) => cat === 'shin' ? (y < 1985 ? 160 : y < 2000 ? 200 : 230) : cat === 'tram' ? 12 : cat === 'sub' ? 30 : y < 1900 ? 33 : y < 1930 ? 36 : y < 1960 ? 42 : 50;
+// 当時の最高速度の目安（km/h）
+const eraTop = (y, cat) => cat === 'shin' ? (y < 1985 ? 210 : y < 1997 ? 240 : 275) : cat === 'tram' ? 30 : cat === 'sub' ? (y < 1960 ? 55 : 75) : y < 1900 ? 38 : y < 1925 ? 55 : y < 1960 ? 70 : y < 1990 ? 95 : 110;
 function plen(pts) { let d = 0; for (let i = 1; i < pts.length; i++) d += km(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]); return d; }
 function buildRoute(li, y, rev) {
   const ps = P.filter(p => p.l === li && present(p, y));
@@ -873,38 +905,163 @@ $('rGo').onclick = () => {
     const y2 = ys[0] || P.filter(p => p.l === li).map(p => p.s).sort((a, b) => a - b)[0];
     toast(`${esc(LN[li])}は${y}年にはまだありません。${y2}年に乗ります`, 4000); y = y2;
   }
-  rideStart(li, y, false);
+  showTicket(li, y, false);
 };
 $('rLine').onkeydown = e => { if (e.key === 'Enter') $('rGo').onclick(); };
-function rideStart(li, y, rev) {
-  rideStop();
+// 切符と改札
+let tk = null;
+const stName = s => s.n.replace(/駅(（.*）)?$/, '$1');
+function showTicket(li, y, rev) {
   const R = buildRoute(li, y, rev);
-  if (!R || R.total < 0.3) { toast('この路線は短すぎて乗れませんでした', 3000); return; }
-  Object.assign(ride, {on: true, li, y, R, pos: 0, next: 0, dwell: 1.2, paused: false, rev, ti: 0});
-  focus = li; $('slider').value = y; draw(y, false);
-  $('rPick').style.display = 'none'; $('rMain').style.display = 'block';
-  $('rTitle').textContent = `🚂 ${LN[li]}（${y}年・${era(y)}）`;
+  if (!R || R.total < 0.3 || R.stops.length < 2) { toast('この路線は短すぎて乗れませんでした', 3000); return; }
+  tk = {li, y, rev, R};
+  $('tkFrom').textContent = stName(S[R.stops[0].i]);
+  $('tkTo').textContent = stName(S[R.stops[R.stops.length - 1].i]);
+  $('tkLine').textContent = `${LN[li]}　${R.total.toFixed(1)}km・${R.stops.length}駅`;
+  $('tkDate').textContent = `${era(y)}（${y}年）　当日限り有効`;
+  const first1872 = y === 1872 && /東海道線/.test(LN[li]);
+  $('tkFare').textContent = first1872 ? '下等 37銭5厘（上等 1円12銭5厘・中等 75銭）' : '　';
+  $('tkNo').textContent = 'No.' + String(1 + rnd(9999)).padStart(4, '0');
+  $('tkPunch').classList.remove('done');
+  $('ticket').classList.add('show');
+}
+$('tkCancel').onclick = () => { $('ticket').classList.remove('show'); };
+$('tkGo').onclick = () => {
+  if ($('rSound').checked) ac();
+  if (rsOn()) punch();
+  $('tkPunch').classList.add('done');
+  setTimeout(() => { $('ticket').classList.remove('show'); rideStart(tk.li, tk.y, tk.rev, tk.R); }, 550);
+};
+
+// 乗車中の音（すべてその場で合成）
+function ac() {
+  if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (audio && audio.state === 'suspended') audio.resume();
+  return audio;
+}
+const rsOn = () => $('rSound').checked && audio;
+let brown = null;
+function brownNoise() {
+  if (brown) return brown;
+  const n = audio.sampleRate * 2; brown = audio.createBuffer(1, n, audio.sampleRate);
+  const d = brown.getChannelData(0); let last = 0;
+  for (let i = 0; i < n; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
+  return brown;
+}
+function env(g, t, peak, a1, hold, rel) { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + a1); g.gain.setValueAtTime(peak, t + a1 + hold); g.gain.linearRampToValueAtTime(0, t + a1 + hold + rel); }
+function thump(t, vol) {
+  const s = audio.createBufferSource(); s.buffer = brownNoise();
+  const f = audio.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 320;
+  const g = audio.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0005, t + 0.11);
+  s.connect(f).connect(g).connect(audio.destination); s.start(t, Math.random()); s.stop(t + 0.12);
+  const o = audio.createOscillator(); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.08);
+  const og = audio.createGain(); og.gain.setValueAtTime(vol * .5, t); og.gain.exponentialRampToValueAtTime(0.0005, t + 0.09);
+  o.connect(og).connect(audio.destination); o.start(t); o.stop(t + 0.1);
+}
+function punch() { const t = audio.currentTime; thump(t, .5); }
+// レールの継ぎ目：ガタン（前の台車）ゴトン（次の車両の台車）
+function joint(v) {
+  if (!rsOn() || ride.R.cat === 'shin') return;
+  const t = audio.currentTime + 0.01, ms = Math.max(1, v / 3.6);
+  const ax = clamp(2.1 / ms, 0.05, 0.22), bg = clamp(5.5 / ms, 0.14, 0.6), vol = ride.R.cat === 'tram' ? .18 : .3;
+  thump(t, vol); thump(t + ax, vol * .8); thump(t + bg, vol * .9); thump(t + bg + ax, vol * .7);
+  ride.bump = 1;
+}
+function whistle(t, len) {  // 汽笛
+  const g = audio.createGain(); env(g, t, .07, .08, len, .35);
+  const f = audio.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1100; f.Q.value = 1.1;
+  f.connect(g).connect(audio.destination);
+  for (const fr of [466, 587, 698]) { const o = audio.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(fr * .95, t); o.frequency.linearRampToValueAtTime(fr, t + .15); o.connect(f); o.start(t); o.stop(t + len + .5); }
+}
+function bell(t, len) {  // 発車ベル
+  const o = audio.createOscillator(); o.type = 'square'; o.frequency.value = 1250;
+  const am = audio.createGain(); am.gain.value = .5;
+  const lfo = audio.createOscillator(); lfo.frequency.value = 22; const lg = audio.createGain(); lg.gain.value = .5; lfo.connect(lg).connect(am.gain);
+  const f = audio.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 2800;
+  const g = audio.createGain(); env(g, t, .03, .02, len, .15);
+  o.connect(am).connect(f).connect(g).connect(audio.destination); o.start(t); lfo.start(t); o.stop(t + len + .3); lfo.stop(t + len + .3);
+}
+function melody(t, notes) {  // 発車メロディ風（このアプリのための短い旋律）
+  notes.forEach((fr, k) => {
+    const tt = t + k * .17, o = audio.createOscillator(), o2 = audio.createOscillator(), g = audio.createGain();
+    o.type = 'sine'; o.frequency.value = fr; o2.type = 'sine'; o2.frequency.value = fr * 2;
+    const g2 = audio.createGain(); g2.gain.value = .25;
+    g.gain.setValueAtTime(0, tt); g.gain.linearRampToValueAtTime(.06, tt + .02); g.gain.exponentialRampToValueAtTime(.001, tt + .5);
+    o.connect(g); o2.connect(g2).connect(g); g.connect(audio.destination); o.start(tt); o2.start(tt); o.stop(tt + .55); o2.stop(tt + .55);
+  });
+}
+function departSound(first) {
+  if (!rsOn()) return;
+  const t = audio.currentTime + .05, y = ride.y, c = ride.R.cat;
+  if (c === 'tram') return bell(t, .25);
+  if (c === 'shin') return melody(t, first ? [880, 1109, 1319, 1760] : [1109, 1319]);
+  if (y < 1925) return whistle(t, first ? 1.1 : .6);
+  if (y < 1989) return bell(t, first ? 2.2 : 1.2);
+  return melody(t, first ? [659, 784, 988, 1319, 1175, 988, 1175] : [784, 988, 1319, 1175]);
+}
+function arriveChime() {
+  if (!rsOn()) return;
+  const t = audio.currentTime;
+  [[988, 0], [784, .35]].forEach(([fr, d]) => { const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = fr; g.gain.setValueAtTime(0, t + d); g.gain.linearRampToValueAtTime(.05, t + d + .02); g.gain.exponentialRampToValueAtTime(.001, t + d + .9); o.connect(g).connect(audio.destination); o.start(t + d); o.stop(t + d + 1); });
+}
+function squeal() {  // ブレーキのきしみ
+  if (!rsOn() || ride.R.cat === 'shin') return;
+  const t = audio.currentTime, o = audio.createOscillator(), g = audio.createGain();
+  o.frequency.setValueAtTime(2700, t); o.frequency.linearRampToValueAtTime(2150, t + 1.1);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(.008, t + .2); g.gain.linearRampToValueAtTime(0, t + 1.2);
+  o.connect(g).connect(audio.destination); o.start(t); o.stop(t + 1.25);
+}
+function rumbleStart() {
+  if (!rsOn()) return;
+  const s = audio.createBufferSource(); s.buffer = brownNoise(); s.loop = true;
+  const f = audio.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = ride.R.cat === 'shin' ? 400 : 180;
+  const g = audio.createGain(); g.gain.value = 0;
+  s.connect(f).connect(g).connect(audio.destination); s.start();
+  ride.rumble = {s, g};
+}
+function rumbleStop() { if (ride.rumble) { try { ride.rumble.s.stop(); } catch (e) {} ride.rumble = null; } }
+
+// 車内の文字案内
+function led(text) {
+  if (ride.ledText === text) return;
+  ride.ledText = text;
+  const el = $('ledText'); el.textContent = text; el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+}
+const clockStr = m => { const t = 9 * 60 + Math.round(m); return `${Math.floor(t / 60) % 24}:${String(t % 60).padStart(2, '0')}`; };
+
+function rideStart(li, y, rev, R0route) {
+  rideStop();
+  const R = R0route || buildRoute(li, y, rev);
+  if (!R || R.total < 0.3 || R.stops.length < 2) { toast('この路線は短すぎて乗れませんでした', 3000); return; }
+  Object.assign(ride, {on: true, li, y, R, pos: 0, next: 0, dwell: 2.4, paused: false, rev, ti: 0, sim: 0, lastStop: 0, jointT: 0, bump: 0, squealed: false, ledText: '', top: eraTop(y, R.cat), departing: true});
+  focus = li; $('slider').value = y; draw(y, false); RIDING = true; legend();
+  showCard('ride'); $('rPick').style.display = 'none'; $('rMain').style.display = 'block';
+  $('rTitle').textContent = '';
+  $('ride').querySelector('.gl').textContent = `⠿ 🚂 ${LN[li]}（${y}年・${era(y)}）`;
   $('rPause').textContent = '❚❚';
   ride.trail = L.polyline([R.pts[0]], {renderer: R0, interactive: false, color: '#ff8f00', weight: 6, opacity: .8}).addTo(rideLayer);
   ride.mk = L.marker(R.pts[0], {icon: L.divIcon({className: 'train', html: R.cat === 'shin' ? '🚄' : R.cat === 'tram' ? '🚋' : trainIcon(y), iconSize: [22, 22]}), interactive: false, zIndexOffset: 1000}).addTo(rideLayer);
   map.setView(R.pts[0], 14, {animate: false});
-  if (R.stops.length && R.stops[0].km < 0.05) { arrive(0); ride.next = 1; }
-  board();
+  ride.dest = stName(S[R.stops[R.stops.length - 1].i]);
+  if (R.stops[0].km < 0.05) { board(0); ride.next = 1; }
+  led(`この列車は ${ride.dest}ゆきです　まもなく発車します`);
+  rumbleStart(); departSound(true);
   ride.last = performance.now();
   requestAnimationFrame(rideStep);
 }
 function rideStop() {
-  ride.on = false;
+  ride.on = false; rumbleStop();
   if (ride.mk) rideLayer.removeLayer(ride.mk); if (ride.trail) rideLayer.removeLayer(ride.trail);
   ride.mk = ride.trail = null;
+  $('map').style.transform = '';
+  RIDING = false; legend();
 }
-function rideMinutes(d) { return Math.round(d / eraKmh(ride.y, ride.R.cat) * 60); }
-const hm = m => m >= 60 ? `${Math.floor(m / 60)}時間${m % 60}分` : `${m}分`;
+const hm = m => { m = Math.round(m); return m >= 60 ? `${Math.floor(m / 60)}時間${m % 60}分` : `${m}分`; };
 function board(arrived) {
   const R = ride.R, st = R.stops;
   const curI = arrived != null ? arrived : ride.next - 1;
   const nextI = arrived != null ? arrived + 1 : ride.next;
-  const name = k => k >= 0 && k < st.length ? S[st[k].i].n.replace(/駅$/, '') : '';
+  const name = k => k >= 0 && k < st.length ? stName(S[st[k].i]) : '';
   const big = arrived != null ? name(arrived) : name(nextI);
   const lab = arrived != null ? (arrived === st.length - 1 ? '終点' : '') : (nextI < st.length ? (nextI === st.length - 1 ? 'つぎは 終点' : 'つぎは') : '');
   const s = arrived != null ? S[st[arrived].i] : nextI < st.length ? S[st[nextI].i] : null;
@@ -912,39 +1069,134 @@ function board(arrived) {
   $('rBoard').style.borderTopColor = CATS[R.cat].color;
 }
 function arrive(k) {
-  board(k); ride.dwell = k === ride.R.stops.length - 1 ? 0 : 1.1;
-  beep([880, 659], .35, .06);
+  const R = ride.R, s = S[R.stops[k].i], last = k === R.stops.length - 1;
+  board(k); ride.dwell = last ? 0 : 1.3; ride.lastStop = R.stops[k].km; ride.squealed = false;
+  if (!last) ride.sim += R.cat === 'tram' || R.cat === 'sub' ? .4 : .6;  // 停車時間
+  led(last ? `終点 ${stName(s)}です　ご乗車ありがとうございました` : `${stName(s)}です　${stName(s)}駅は${s.o}年（${era(s.o)}）開業`);
+  arriveChime();
+}
+function meter(kmh) {
+  const scale = Math.ceil(ride.top * 1.2 / 20) * 20, ang = -90 + 180 * clamp(kmh / scale, 0, 1);
+  $('needle').setAttribute('transform', `rotate(${ang.toFixed(1)} 50 55)`);
+  $('rSpd').textContent = `${Math.round(kmh)} km/h`;
+  $('rClock').textContent = `時刻 ${clockStr(ride.sim)}（9:00発・当時の目安）`;
+}
+// 列車がパネルに隠れないよう、地図の見えている部分の真ん中に置く
+function followTrain(pt) {
+  const W = map.getSize().x, H = map.getSize().y, r = $('ride').getBoundingClientRect();
+  const cy = (r.top + r.bottom) / 2 > H / 2 ? Math.max(40, r.top / 2) : Math.min(H - 40, (r.bottom + H) / 2);
+  const p = map.latLngToContainerPoint(pt);
+  map.panBy([p.x - W / 2, p.y - cy], {animate: false});
 }
 function rideStep(now) {
   if (!ride.on) return;
   const R = ride.R, dt = Math.min(.1, (now - ride.last) / 1000); ride.last = now;
+  let f = 0;
   if (!ride.paused) {
-    if (ride.dwell > 0) { ride.dwell -= dt * ride.speed; if (ride.dwell <= 0) board(); }
-    else {
-      ride.pos += dt * KM_PER_SEC * ride.speed;
-      if (ride.next < R.stops.length && ride.pos >= R.stops[ride.next].km) { ride.pos = R.stops[ride.next].km; arrive(ride.next); ride.next++; }
+    if (ride.dwell > 0) {
+      ride.dwell -= dt * ride.speed;
+      if (ride.dwell <= 0) { board(); if (!ride.departing) departSound(false); ride.departing = false; const nx = R.stops[ride.next]; if (nx) led(`つぎは ${stName(S[nx.i])}です　この列車は ${ride.dest}ゆき`); }
+    } else {
+      // 加速と減速：駅を出てしばらくは加速、次の駅の手前で減速
+      const nextKm = ride.next < R.stops.length ? R.stops[ride.next].km : R.total;
+      const ds = ride.pos - ride.lastStop, dn = nextKm - ride.pos;
+      const acc = R.cat === 'shin' ? 3 : R.cat === 'tram' ? .15 : .8;
+      f = Math.min(clamp(Math.sqrt(Math.max(ds, 0) / acc), .1, 1), clamp(Math.sqrt(Math.max(dn, 0) / acc), .07, 1));
+      const move = dt * KM_PER_SEC * ride.speed * f * (R.cat === 'shin' ? 2.2 : 1);
+      ride.pos += move;
+      ride.sim += move / (ride.top * Math.max(f, .25)) * 60;
+      if (dn < acc * .5 && !ride.squealed) { ride.squealed = true; squeal(); const nx = R.stops[ride.next]; if (nx) led(`まもなく ${stName(S[nx.i])}です`); }
+      if (ride.next < R.stops.length && ride.pos >= R.stops[ride.next].km) { ride.pos = R.stops[ride.next].km; arrive(ride.next); ride.next++; f = 0; }
+      // ガタンゴトン：当時の速さで25mのレールを通るごと
+      const v = ride.top * f;
+      ride.jointT -= dt;
+      if (v > 8 && ride.jointT <= 0) { joint(v); ride.jointT = 25 / (v / 3.6); }
     }
   }
+  if (ride.rumble) ride.rumble.g.gain.setTargetAtTime(f > 0 ? .03 + .1 * f : .012, audio.currentTime, .2);
   const [pt, idx] = pointAt(R, Math.min(ride.pos, R.total));
   while (ride.ti < idx) { ride.ti++; ride.trail.addLatLng(R.pts[ride.ti]); }
   const tl = ride.trail.getLatLngs(); if (tl.length > ride.ti + 1) tl.pop();
   ride.trail.addLatLng(pt);
-  ride.mk.setLatLng(pt); map.setView(pt, map.getZoom(), {animate: false});
-  const m = rideMinutes(ride.pos);
-  $('rInfo').textContent = `${ride.pos.toFixed(1)}km／${R.total.toFixed(1)}km　出発から約${hm(m)}（当時の目安）`;
+  ride.mk.setLatLng(pt); followTrain(pt);
+  // 揺れ
+  if (opt.shake && !REDUCED && !ride.paused) {
+    const tx = Math.sin(now / 430) * 1.4 * f + (Math.random() - .5) * 3 * ride.bump, ty = Math.sin(now / 270) * .8 * f + 1.6 * ride.bump;
+    ride.bump *= .82; $('map').style.transform = `translate(${tx.toFixed(1)}px,${ty.toFixed(1)}px)`;
+  } else $('map').style.transform = '';
+  meter(ride.top * f);
+  $('rInfo').textContent = `${ride.pos.toFixed(1)}km／${R.total.toFixed(1)}km　出発から約${hm(ride.sim)}（当時の目安）`;
   if (ride.pos >= R.total - 1e-6 && ride.dwell <= 0) {
-    $('rInfo').innerHTML = `終点に着きました。${R.total.toFixed(1)}km・${R.stops.length}駅、当時の目安で約<b>${hm(rideMinutes(R.total))}</b>`;
-    ride.on = false; $('rPause').textContent = '↻'; return;
+    $('rInfo').innerHTML = `終点に着きました。${R.total.toFixed(1)}km・${R.stops.length}駅、当時の目安で約<b>${hm(ride.sim)}</b>`;
+    ride.on = false; rumbleStop(); $('map').style.transform = ''; meter(0); $('rPause').textContent = '↻'; return;
   }
   requestAnimationFrame(rideStep);
 }
 $('rPause').onclick = () => {
   if (!ride.on) return rideStart(ride.li, ride.y, ride.rev);
   ride.paused = !ride.paused; $('rPause').textContent = ride.paused ? '▶' : '❚❚'; ride.last = performance.now();
+  if (ride.rumble) ride.rumble.g.gain.value = ride.paused ? 0 : .012;
 };
 $('rSpeed').onchange = () => { ride.speed = +$('rSpeed').value; };
-$('rRev').onclick = () => rideStart(ride.li, ride.y, !ride.rev);
-$('rQuit').onclick = () => { rideStop(); focus = null; showCard('panel'); map.setZoom(11); draw(curYear(), false); };
+$('rRev').onclick = () => { if ($('rSound').checked) ac(); rideStart(ride.li, ride.y, !ride.rev); };
+$('rSound').onchange = () => { if ($('rSound').checked) { ac(); if (ride.on && !ride.rumble) rumbleStart(); } else rumbleStop(); };
+$('rQuit').onclick = () => { $('ride').querySelector('.gl').textContent = '⠿ 🚂 乗ってみる'; rideStop(); focus = null; showCard('panel'); map.setZoom(11); draw(curYear(), false); };
+
+// ---------- 使い方の案内 ----------
+const GUIDE = [
+  ['🚂 鉄道のひろがりへようこそ', '▶ を押すと、1872年の新橋開業から今まで、首都圏に鉄道が広がっていく様子を再生します。', '下のつまみを動かすと、好きな年へ移れます。'],
+  ['≡ メニューに遊び方がまとまっています', '🚂 乗ってみる、⭐ 見どころ再生、クイズ、路線ものがたり、わたしの年表、2つの年を比べる、などがあります。', '色の分け方や背景の空中写真も、メニューで変えられます。'],
+  ['地図にさわってみましょう', '駅をタップすると「駅カード」が出ます。地図を長押し（パソコンは右クリック）すると、その辺りの鉄道史が出ます。', 'このパネルは上の帯をドラッグして動かせ、▾ でたためます。']
+];
+function guide(k) {
+  if (k >= GUIDE.length) { $('guide').classList.remove('show'); return; }
+  const [t, ...ps] = GUIDE[k];
+  $('gStep').innerHTML = `<h3>${t}</h3>` + ps.map(p => `<p>${p}</p>`).join('');
+  $('gDots').textContent = `${k + 1}／${GUIDE.length}`;
+  $('gNext').textContent = k === GUIDE.length - 1 ? 'はじめる' : '次へ';
+  $('gNext').onclick = () => guide(k + 1);
+  $('guide').classList.add('show');
+}
+$('gSkip').onclick = () => $('guide').classList.remove('show');
+$('guideBtn').onclick = () => { showCard('panel'); guide(0); };
+
+// ---------- キー操作（パソコン） ----------
+document.addEventListener('keydown', e => {
+  if (e.target.closest('input,select,textarea')) return;
+  if (e.key === 'Escape') { $('guide').classList.remove('show'); $('ticket').classList.remove('show'); if (getComputedStyle($('menu')).display !== 'none') showCard('panel'); return; }
+  if (getComputedStyle($('panel')).display === 'none') return;
+  if (e.key === ' ') { e.preventDefault(); $('play').onclick(); }
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); jump(curYear() + (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1)); }
+  else if (e.key === 'm' || e.key === 'M') $('menuBtn').onclick();
+});
+
+// ---------- 🔗 この画面を共有 ----------
+function shareURL() {
+  const c = map.getCenter(), p = new URLSearchParams();
+  p.set('y', ride.on || getComputedStyle($('ride')).display !== 'none' ? ride.y || curYear() : curYear());
+  p.set('z', map.getZoom()); p.set('c', c.lat.toFixed(4) + ',' + c.lng.toFixed(4));
+  if (focus != null) { p.set('l', LN[focus]); p.set('m', getComputedStyle($('ride')).display !== 'none' ? 'ride' : 'story'); }
+  return location.origin + location.pathname + '#' + p.toString();
+}
+$('shareBtn').onclick = async () => {
+  showCard('panel');
+  const url = shareURL(), title = `鉄道のひろがり ${curYear()}年`;
+  try { if (navigator.share) { await navigator.share({title, url}); return; } } catch (e) { if (e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); toast(`🔗 リンクをコピーしました<br><small style="word-break:break-all">${esc(url)}</small>`, 6000); }
+  catch (e) { toast(`このリンクをコピーしてください<br><small style="word-break:break-all;user-select:all">${esc(url)}</small>`); }
+};
+function openFromLink() {
+  if (!location.hash) return false;
+  const p = new URLSearchParams(location.hash.slice(1));
+  const y = +p.get('y'), z = +p.get('z'), c = (p.get('c') || '').split(',').map(Number);
+  if (!y && !p.get('l')) return false;
+  if (c.length === 2 && !isNaN(c[0])) map.setView(c, z || 11, {animate: false});
+  if (y) { $('slider').value = clamp(y, Y0, Y1); draw(curYear(), false); }
+  const li = p.get('l') ? LN.indexOf(p.get('l')) : -1;
+  if (li >= 0 && p.get('m') === 'story') storyStart(li);
+  if (li >= 0 && p.get('m') === 'ride') { rideOpen(li); $('rYear').value = y || curYear(); }
+  return true;
+}
 
 // ---------- 🎂 わたしの年表 ----------
 function ageText(y) {
@@ -990,7 +1242,7 @@ async function start() {
     prep();
     $('msg').style.display = 'none';
     draw(curYear(), false);
-    placeCards(); versionNotice();
+    placeCards(); const linked = openFromLink(); if (!linked) versionNotice(); else try { localStorage.setItem('eki_ver', APP_VER); } catch (e) {}
   } catch (e) {
     $('msg').innerHTML = '読み込みに失敗しました（' + esc(e.message) + '）。<button id="retry">もう一度</button>';
     $('retry').onclick = () => start();
