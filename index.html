@@ -13,7 +13,7 @@
 :root{--ink:#2b2118;--sub:#6b5a44;--paper:#fbf6ea;--edge:#d8ccb0;--red:#c62828}
 html,body{margin:0;height:100%;font-family:"Yu Gothic UI",Meiryo,"Hiragino Sans",sans-serif;background:#e8e2d2;color:var(--ink);overflow:hidden}
 #map{position:absolute;inset:0}
-.card{position:absolute;z-index:1000;left:12px;right:12px;bottom:16px;max-width:640px;margin:auto;background:var(--paper);border:1px solid var(--edge);border-radius:12px;box-shadow:0 3px 14px rgba(0,0,0,.25);padding:10px 14px;max-height:62vh;overflow:auto;box-sizing:border-box}
+.card{position:absolute;z-index:1001;left:12px;right:12px;bottom:16px;max-width:640px;margin:auto;background:var(--paper);border:1px solid var(--edge);border-radius:12px;box-shadow:0 3px 14px rgba(0,0,0,.25);padding:10px 14px;max-height:62vh;overflow:auto;box-sizing:border-box}
 .head{display:flex;align-items:flex-end;gap:10px}
 #year{font-size:34px;font-weight:700;line-height:1}
 #era{font-size:15px;color:var(--sub)}
@@ -53,6 +53,22 @@ input[type=text]{width:8.5em}
 #divider .knob{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);width:36px;height:36px;border-radius:50%;background:#1f4e79;color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 1px 6px rgba(0,0,0,.4)}
 .cmpTag{position:absolute;z-index:999;top:10px;background:rgba(31,78,121,.9);color:#fff;font-weight:700;font-size:12px;padding:3px 8px;border-radius:6px;display:none;max-width:calc(50vw - 66px)}
 #tagA{left:10px}#tagB{right:54px}
+.grip{display:flex;align-items:center;gap:6px;margin:-6px -8px 6px;padding:2px 4px 4px 8px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;font-size:11px;color:var(--sub);border-bottom:1px dashed var(--edge)}
+.grip:active{cursor:grabbing}
+.grip .gl{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grip .fold{font-size:13px;padding:0 10px;line-height:22px}
+.card.folded .more{display:none}
+.card.moved{bottom:auto;right:auto;margin:0;width:min(640px,calc(100vw - 24px))}
+.verTag{font-weight:700;color:#1f4e79}
+#toast{position:absolute;z-index:1004;top:58px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid var(--edge);border-left:5px solid #1f4e79;border-radius:8px;box-shadow:0 3px 12px rgba(0,0,0,.25);padding:8px 30px 8px 12px;font-size:13px;line-height:1.6;width:max-content;max-width:min(440px,86vw);max-height:50vh;overflow:auto;display:none}
+#toastX{position:absolute;right:2px;top:2px;border:none;background:none;font-size:18px;padding:0 6px}
+#toast ul{margin:4px 0 0;padding-left:1.2em}
+#qMain{display:none}
+.qc{display:block;width:100%;text-align:left;margin-top:6px;padding:7px 10px}
+.qc.ok{background:#e3f2e5;border-color:#2e8b57;font-weight:700}
+.qc.ng{background:#fde8e6;border-color:#c62828}
+.tl{display:flex;gap:6px;align-items:baseline;font-size:12px;margin-top:2px}
+.tl button{font-size:11px;padding:1px 5px;min-width:3.6em}
 </style></head><body>
 <div id="map"></div>
 <div id="msg">線路データを読み込み中…</div>
@@ -61,7 +77,10 @@ input[type=text]{width:8.5em}
 <div id="divider"><div class="knob">⇔</div></div>
 <div id="tagA" class="cmpTag"></div><div id="tagB" class="cmpTag"></div>
 
+<div id="toast"><div id="toastBody"></div><button id="toastX" title="閉じる">×</button></div>
+
 <div id="panel" class="card">
+  <div class="grip" data-card="panel"><span class="gl">⠿ 鉄道のひろがり <span class="verTag"></span></span><button class="fold" title="たたむ／ひろげる">▾</button></div>
   <div class="head">
     <div><span id="year">1872</span> <span id="era"></span></div>
     <div id="count"><canvas id="spark"></canvas><span id="cnt"></span></div>
@@ -73,67 +92,94 @@ input[type=text]{width:8.5em}
     <button id="fwd10" title="10年すすむ">+10</button>
     <select id="speed"><option value="900">ゆっくり</option><option value="450" selected>ふつう</option><option value="180">はやい</option></select>
   </div>
-  <div class="row">
-    <input type="text" id="q" list="names" placeholder="駅名で検索">
-    <button id="find">🔍</button>
-    <button id="quizBtn">🎓 クイズ</button>
-    <button id="storyBtn">📖 ものがたり</button>
-    <button id="cmpBtn">↔ 比べる</button>
-    <button id="optBtn">⚙ 表示</button>
-  </div>
-  <div id="drawer">
-    <div class="row" id="chips"></div>
+  <div class="more">
     <div class="row">
-      <label><input type="checkbox" id="o_emph"> 変化を強調</label>
-      <label><input type="checkbox" id="o_ghost"> 廃線の幽霊</label>
-      <label><input type="checkbox" id="o_follow"> カメラが追う</label>
-      <label><input type="checkbox" id="o_gogai"> 号外</label>
-      <label><input type="checkbox" id="o_sound"> 音</label>
+      <input type="text" id="q" list="names" placeholder="駅名で検索">
+      <button id="find">🔍</button>
+      <button id="placeBtn" title="地図の場所を選んで、その辺りの鉄道史を見る">📍 この辺り</button>
+      <button id="quizBtn">🎓 クイズ</button>
+      <button id="storyBtn">📖 ものがたり</button>
+      <button id="cmpBtn">↔ 比べる</button>
+      <button id="optBtn">⚙ 表示</button>
     </div>
-    <div class="row">
-      <label>背景 <select id="o_bg"><option value="pale">淡色地図</option><option value="photo">時代の空中写真</option></select></label>
-      <label>時代へ <select id="eraJump"></select></label>
+    <div id="drawer">
+      <div class="row" id="chips"></div>
+      <div class="row">
+        <label><input type="checkbox" id="o_emph"> 変化を強調</label>
+        <label><input type="checkbox" id="o_ghost"> 廃線の幽霊</label>
+        <label><input type="checkbox" id="o_follow"> カメラが追う</label>
+        <label><input type="checkbox" id="o_gogai"> 号外</label>
+        <label><input type="checkbox" id="o_sound"> 音</label>
+        <label><input type="checkbox" id="o_autofold"> 再生中はパネルを小さく</label>
+      </div>
+      <div class="row">
+        <label>背景 <select id="o_bg"><option value="pale">淡色地図</option><option value="photo">時代の空中写真</option></select></label>
+        <label>時代へ <select id="eraJump"></select></label>
+      </div>
+      <div class="row" style="font-size:12px">
+        <span class="verTag"></span>
+        <button id="aboutBtn" style="font-size:12px">この版について</button>
+        <button id="posReset" style="font-size:12px">パネルを元の位置へ</button>
+      </div>
     </div>
+    <div id="news"></div>
   </div>
-  <div id="news"></div>
   <datalist id="names"></datalist>
   <datalist id="lineNames"></datalist>
 </div>
 
 <div id="quiz" class="card">
-  <div class="head"><div id="qHead"></div><div id="qScore" style="margin-left:auto"></div></div>
-  <div id="qName"></div><div id="qLine"></div>
-  <div id="qAsk">
-    <div><span id="qYear"></span> <span id="qEra"></span></div>
-    <div class="row"><input type="range" id="qSlider" min="1872" value="1930"><button id="qGo">これだ！</button></div>
+  <div class="grip" data-card="quiz"><span class="gl">⠿ 🎓 クイズ</span><button class="fold" title="たたむ／ひろげる">▾</button></div>
+  <div class="more">
+    <div id="qMenu">
+      <div style="font-size:13px;color:var(--sub)">どのクイズに挑戦しますか？（全5問）</div>
+      <button class="qc" data-mode="station">🚉 この駅、何年生まれ？</button>
+      <button class="qc" data-mode="year">🗾 この路線図は何年？</button>
+      <button class="qc" data-mode="line">🛤 光っている路線はどれ？</button>
+      <div class="row"><button id="qMenuQuit" style="margin-left:auto">閉じる</button></div>
+    </div>
+    <div id="qMain">
+      <div class="head"><div id="qHead"></div><div id="qScore" style="margin-left:auto"></div></div>
+      <div id="qName"></div><div id="qLine"></div>
+      <div id="qAsk">
+        <div><span id="qYear"></span> <span id="qEra"></span></div>
+        <div class="row"><input type="range" id="qSlider" min="1872" value="1930"><button id="qGo">これだ！</button></div>
+      </div>
+      <div id="qChoices"></div>
+      <div id="qRes"></div>
+      <div class="row"><button id="qNext" style="display:none">次へ</button><button id="qQuit" style="margin-left:auto">やめる</button></div>
+    </div>
   </div>
-  <div id="qRes"></div>
-  <div class="row"><button id="qNext" style="display:none">次へ</button><button id="qQuit" style="margin-left:auto">やめる</button></div>
 </div>
 
 <div id="story" class="card">
-  <div id="sPick">
-    <div style="font-weight:700">📖 路線ものがたり</div>
-    <div style="font-size:12px;color:var(--sub)">路線名を選ぶと、その路線が伸びていく様子を順番にたどります</div>
-    <div class="row"><input type="text" id="sLine" list="lineNames" placeholder="例：中央本線" style="width:12em"><button id="sGo">はじめる</button><button id="sCancel" style="margin-left:auto">閉じる</button></div>
-  </div>
-  <div id="sMain" style="display:none">
-    <div class="head"><b id="sTitle" style="font-size:17px"></b><span id="sCount" style="margin-left:auto;font-size:12px"></span></div>
-    <div id="sText"></div>
-    <div class="row"><button id="sPrev">◀ 前</button><button id="sAuto">▶ 自動</button><button id="sNext">次 ▶</button><button id="sQuit" style="margin-left:auto">閉じる</button></div>
+  <div class="grip" data-card="story"><span class="gl">⠿ 📖 路線ものがたり</span><button class="fold" title="たたむ／ひろげる">▾</button></div>
+  <div class="more">
+    <div id="sPick">
+      <div style="font-size:12px;color:var(--sub)">路線名を選ぶと、その路線が伸びていく様子を順番にたどります</div>
+      <div class="row"><input type="text" id="sLine" list="lineNames" placeholder="例：中央線" style="width:12em"><button id="sGo">はじめる</button><button id="sCancel" style="margin-left:auto">閉じる</button></div>
+    </div>
+    <div id="sMain" style="display:none">
+      <div class="head"><b id="sTitle" style="font-size:17px"></b><span id="sCount" style="margin-left:auto;font-size:12px"></span></div>
+      <div id="sText"></div>
+      <div class="row"><button id="sPrev">◀ 前</button><button id="sAuto">▶ 自動</button><button id="sNext">次 ▶</button><button id="sQuit" style="margin-left:auto">閉じる</button></div>
+    </div>
   </div>
 </div>
 
 <div id="cmp" class="card">
-  <div style="font-weight:700">↔ 2つの年を比べる <span style="font-size:12px;font-weight:400;color:var(--sub)">（地図の白い線を左右にドラッグ）</span></div>
-  <div class="row"><span style="width:3.5em">左 <b id="cA"></b></span><input type="range" id="cmpA" min="1872"></div>
-  <div class="row"><span style="width:3.5em">右 <b id="cB"></b></span><input type="range" id="cmpB" min="1872"></div>
-  <div class="row"><button id="cmpQuit" style="margin-left:auto">閉じる</button></div>
+  <div class="grip" data-card="cmp"><span class="gl">⠿ ↔ 2つの年を比べる</span><button class="fold" title="たたむ／ひろげる">▾</button></div>
+  <div class="more">
+    <div style="font-size:12px;color:var(--sub)">地図の白い線を左右にドラッグして見比べます</div>
+    <div class="row"><span style="width:3.5em">左 <b id="cA"></b></span><input type="range" id="cmpA" min="1872"></div>
+    <div class="row"><span style="width:3.5em">右 <b id="cB"></b></span><input type="range" id="cmpB" min="1872"></div>
+    <div class="row"><button id="cmpQuit" style="margin-left:auto">閉じる</button></div>
+  </div>
 </div>
 
 <script>
 // 読み込み中に問題が起きたら、止まったままにせず画面に出す
 window.addEventListener('error', e => { const m = document.getElementById('msg'); if (m && m.style.display !== 'none') m.textContent = '問題が起きました：' + (e.message || '') + '（ページを再読み込みしてください）'; });
 </script>
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body></html>
